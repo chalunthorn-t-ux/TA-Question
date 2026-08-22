@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══════════════════ SIDEBAR ══════════════════ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand__logo">TA</div>
+      <div class="brand__text">
+        <h1>{{ title }}</h1>
+        <p>{{ subtitle }}</p>
+      </div>
+    </div>
+
+    <nav class="side-block">
+      <h2 class="side-block__title">สถานะระบบ</h2>
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="stat__value" id="stat-chunks">{{ chunk_count }}</span>
+          <span class="stat__label">ชิ้นความรู้</span>
+        </div>
+        <div class="stat">
+          <span class="stat__value" id="stat-files">{{ sources|length }}</span>
+          <span class="stat__label">เอกสาร</span>
+        </div>
+      </div>
+
+      {% if has_api_key %}
+      <div class="pill pill--ok" id="api-pill">
+        <span class="dot"></span> เชื่อมต่อ {{ chat_model }}
+      </div>
+      {% else %}
+      <div class="pill pill--warn" id="api-pill">
+        <span class="dot"></span> ยังไม่ได้ตั้ง GEMINI_API_KEY
+      </div>
+      {% endif %}
+    </nav>
+
+    <div class="side-block">
+      <h2 class="side-block__title">คลังข้อมูล</h2>
+
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="file-input" multiple
+               accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md" hidden />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M12 16V4m0 0L8 8m4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round"/>
+        </svg>
+        <strong>ลากไฟล์มาวาง</strong>
+        <small>PDF · Word · Excel · CSV</small>
+      </label>
+
+      <button class="btn btn--primary" id="btn-ingest">
+        <span class="btn__label">สร้าง Index</span>
+        <span class="spinner" hidden></span>
+      </button>
+
+      <ul class="file-list" id="file-list">
+        {% for s in sources %}
+        <li><span class="file-list__name" title="{{ s.name }}">{{ s.name }}</span>
+            <span class="file-list__count">{{ s.chunks }}</span></li>
+        {% else %}
+        <li class="file-list__empty">ยังไม่มีเอกสารในระบบ</li>
+        {% endfor %}
+      </ul>
+
+      {% if built_at %}
+      <p class="side-note" id="built-at">อัปเดตล่าสุด: {{ built_at }}</p>
+      {% else %}
+      <p class="side-note" id="built-at"></p>
+      {% endif %}
+    </div>
+
+    <div class="side-block side-block--footer">
+      <button class="btn btn--ghost" id="btn-clear">ล้างบทสนทนา</button>
+    </div>
+  </aside>
+
+  <!-- ══════════════════ MAIN ══════════════════ -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="btn-menu" aria-label="เมนู">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div class="topbar__title">
+        <h2>ถามได้ทุกเรื่องเกี่ยวกับงาน TA</h2>
+        <p>คำตอบอ้างอิงจากเอกสารจริงในระบบ พร้อมบอกที่มาให้ตรวจสอบได้</p>
+      </div>
+    </header>
+
+    <section class="chat" id="chat">
+      <!-- หน้าจอเริ่มต้น -->
+      <div class="welcome" id="welcome">
+        <div class="welcome__badge">🎓</div>
+        <h3>สวัสดีครับ ยินดีต้อนรับสู่ทีม TA</h3>
+        <p>ผมคือพี่เลี้ยงประจำตัวของคุณ ลองเลือกคำถามด้านล่าง หรือพิมพ์สิ่งที่อยากรู้เข้ามาได้เลย</p>
+
+        <div class="suggest-grid">
+          <button class="suggest" data-q="หน้าที่หลักของ TA มีอะไรบ้าง">
+            <span class="suggest__icon">📋</span>
+            <span class="suggest__text"><strong>หน้าที่หลักของ TA</strong><small>ขอบเขตงานที่ต้องรับผิดชอบ</small></span>
+          </button>
+          <button class="suggest" data-q="ค่าตอบแทน TA คิดอย่างไร และเบิกจ่ายเมื่อไหร่">
+            <span class="suggest__icon">💰</span>
+            <span class="suggest__text"><strong>ค่าตอบแทนและการเบิกจ่าย</strong><small>อัตรา รอบจ่าย เอกสารที่ต้องใช้</small></span>
+          </button>
+          <button class="suggest" data-q="ขั้นตอนการส่งเกรดและการบันทึกคะแนนทำอย่างไร">
+            <span class="suggest__icon">📝</span>
+            <span class="suggest__text"><strong>การส่งเกรด/คะแนน</strong><small>ขั้นตอนและกำหนดเวลา</small></span>
+          </button>
+          <button class="suggest" data-q="ถ้าลาหรือสอนแทนไม่ได้ ต้องแจ้งใครและทำอย่างไร">
+            <span class="suggest__icon">🗓️</span>
+            <span class="suggest__text"><strong>การลา / หาคนสอนแทน</strong><small>ขั้นตอนแจ้งและผู้รับผิดชอบ</small></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════ COMPOSER ══════════════════ -->
+    <footer class="composer">
+      <form class="composer__form" id="chat-form">
+        <textarea id="input" rows="1" maxlength="2000"
+                  placeholder="พิมพ์คำถาม เช่น “ต้องส่งใบลงเวลาภายในวันไหน”  (Enter = ส่ง, Shift+Enter = ขึ้นบรรทัดใหม่)"></textarea>
+        <button type="submit" class="send-btn" id="btn-send" aria-label="ส่งคำถาม">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+      <p class="composer__hint">คำตอบสร้างจากเอกสารที่อัปโหลดไว้ — โปรดตรวจสอบแหล่งอ้างอิงก่อนนำไปใช้จริง</p>
+    </footer>
+  </main>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+<div class="scrim" id="scrim"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
