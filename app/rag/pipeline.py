@@ -115,8 +115,10 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
         answer = llm.generate_answer(question, relevant, history)
         status = "ok"
     except llm.LLMError as exc:
-        # ไม่มี key หรือ Gemini ล่ม — ยังคืนข้อความที่ค้นเจอให้ผู้ใช้อ่านเองได้
-        log.warning("สร้างคำตอบไม่ได้: %s", exc)
+        # สรุปคำตอบไม่ได้ (โควตาหมด / Gemini ล่ม / ยังไม่มี key)
+        # ยังคืนข้อความที่ค้นเจอให้อ่านเองได้ ดีกว่าปล่อยให้มือเปล่า
+        # แสดงเฉพาะข้อความภาษาคน — รายละเอียดทางเทคนิคไปอยู่ใน log
+        log.warning("สร้างคำตอบไม่ได้: %s", exc.detail)
         preview = "\n\n".join(
             f"**[{s['ref']}] {s['source']}"
             + (f" · {s['locator']}" if s["locator"] else "")
@@ -124,7 +126,8 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
             for s in sources
         )
         answer = (
-            f"⚠️ {exc}\n\n**ข้อความที่เกี่ยวข้องที่สุดที่ค้นเจอ:**\n\n{preview}"
+            f"{exc.friendly}\n\n"
+            f"ระหว่างนี้ ข้อความจากเอกสารที่ตรงกับคำถามที่สุดคือ\n\n{preview}"
         )
         status = "retrieval_only"
 

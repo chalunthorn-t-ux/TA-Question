@@ -204,7 +204,7 @@
       history.push({ role: "assistant", content: data.answer });
 
       if (data.status === "no_index") toast("ยังไม่มี index — กด “สร้าง Index” ก่อน", "warn");
-      if (data.status === "retrieval_only") toast("โหมดค้นหาเท่านั้น (ยังไม่ได้ตั้ง API key)", "warn");
+      if (data.status === "retrieval_only") toast("สรุปคำตอบไม่ได้ชั่วคราว — แสดงข้อความจากเอกสารให้แทน", "warn", 6000);
     } catch (err) {
       typing.remove();
       addMessage("bot", renderMarkdown(`⚠️ เชื่อมต่อเซิร์ฟเวอร์ไม่ได้\n\n\`${err.message}\``));

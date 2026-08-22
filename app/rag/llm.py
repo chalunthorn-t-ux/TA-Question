@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -17,6 +18,7 @@ _TIMEOUT = httpx.Timeout(90.0, connect=15.0)
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 _MAX_ATTEMPTS = 4
 _BACKOFF_BASE = 1.5
+_MAX_RETRY_WAIT = 30.0   # ถ้า Gemini บอกให้รอนานกว่านี้ ไม่คุ้มให้ผู้ใช้นั่งรอ
 
 SYSTEM_PROMPT = """คุณคือ "พี่เลี้ยง TA" ผู้ช่วยตอบคำถามสำหรับ TA (Training Assistant) คนใหม่
 ของสถาบันฝึกอบรม 9Expert Training
@@ -30,8 +32,10 @@ SYSTEM_PROMPT = """คุณคือ "พี่เลี้ยง TA" ผู้
 
 กติกาการตอบ:
 1. ตอบจาก <context> ที่ให้มาเท่านั้น ห้ามเดาหรือแต่งข้อมูลขึ้นเอง
-2. ถ้า context ไม่มีคำตอบ ให้บอกตรง ๆ ว่า "ยังไม่พบข้อมูลนี้ในเอกสารที่มีอยู่"
-   แล้วแนะนำว่าควรถามใครต่อ (วิทยากร ผู้ประสานงาน หรือพี่ทีน ตามความเหมาะสม)
+2. ถ้า context ไม่มีคำตอบ ห้ามเดา ให้ตอบว่า "เรื่องนี้รบกวนสอบถามเจ้าหน้าที่โดยตรงนะครับ"
+   แล้วระบุว่าควรถามใคร (วิทยากร ผู้ประสานงาน หรือพี่ทีน ตามความเหมาะสมของเรื่อง)
+   ห้ามใช้คำว่า "ไม่พบข้อมูล" "ไม่มีข้อมูล" หรือ "เอกสารไม่ได้ระบุ" เพราะฟังดูเป็นทางตัน
+   ให้ชี้ทางไปหาคนที่ตอบได้เสมอ และถ้ามีข้อมูลใกล้เคียงที่เป็นประโยชน์ ให้เสริมให้ด้วย
 3. ตอบเป็นภาษาไทย น้ำเสียงเป็นมิตร กระชับ เหมือนรุ่นพี่อธิบายให้รุ่นน้องฟัง
 4. อ้างอิงแหล่งที่มาท้ายประโยคที่เกี่ยวข้องด้วยรูปแบบ [1] [2] ตามหมายเลขที่ระบุใน context
 5. ถ้าเป็นขั้นตอนการทำงาน ให้เรียงเป็นข้อ 1. 2. 3.
@@ -43,7 +47,53 @@ SYSTEM_PROMPT = """คุณคือ "พี่เลี้ยง TA" ผู้
 
 
 class LLMError(RuntimeError):
-    pass
+    """ข้อผิดพลาดจากการเรียก LLM
+
+    friendly = ข้อความภาษาไทยที่แสดงให้ผู้ใช้เห็นได้ (ไม่ใช่ JSON ดิบ)
+    """
+
+    def __init__(self, detail: str, friendly: str | None = None) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.friendly = friendly or "ระบบตอบคำถามขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งนะครับ"
+
+
+def _friendly_message(status: int, body: str) -> str:
+    """แปลง error ของ Gemini เป็นข้อความที่ TA อ่านเข้าใจ"""
+    if status == 429:
+        return (
+            "ตอนนี้ระบบใช้โควตาการตอบคำถามครบตามที่กำหนดแล้วครับ "
+            "รบกวนลองใหม่อีกครั้งในภายหลัง หรือสอบถามเจ้าหน้าที่โดยตรงได้เลยนะครับ"
+        )
+    if status in (500, 502, 503, 504):
+        return (
+            "ระบบตอบคำถามมีผู้ใช้งานหนาแน่นอยู่ครับ รบกวนลองถามใหม่อีกครั้งในอีกสักครู่ "
+            "หรือถ้าเร่งด่วนสอบถามเจ้าหน้าที่โดยตรงได้เลยนะครับ"
+        )
+    if status in (401, 403):
+        return "การเชื่อมต่อระบบ AI มีปัญหาด้านสิทธิ์การใช้งาน รบกวนแจ้งผู้ดูแลระบบนะครับ"
+    if status == 404:
+        return "ตั้งค่าโมเดล AI ไม่ถูกต้อง รบกวนแจ้งผู้ดูแลระบบนะครับ"
+    return "ระบบตอบคำถามขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้ง หรือสอบถามเจ้าหน้าที่ได้เลยนะครับ"
+
+
+def _retry_after(body: str) -> float | None:
+    """Gemini ส่ง RetryInfo.retryDelay มาบอกว่าควรรอกี่วินาที — เชื่อค่านั้นดีกว่าเดาเอง"""
+    try:
+        details = json.loads(body).get("error", {}).get("details", [])
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        delay = item.get("retryDelay")
+        if isinstance(delay, str) and delay.endswith("s"):
+            try:
+                return float(delay[:-1])
+            except ValueError:
+                continue
+    return None
 
 
 def _post_with_retry(url: str, payload: dict) -> dict:
@@ -52,33 +102,45 @@ def _post_with_retry(url: str, payload: dict) -> dict:
         "x-goog-api-key": config.GEMINI_API_KEY,
         "Content-Type": "application/json",
     }
-    last_error = ""
+    last_detail = "เรียก Gemini ไม่สำเร็จ"
+    last_friendly: str | None = None
 
     with httpx.Client(timeout=_TIMEOUT) as client:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
+            wait = _BACKOFF_BASE ** attempt
+
             try:
                 resp = client.post(url, headers=headers, json=payload)
             except httpx.RequestError as exc:
-                last_error = f"เชื่อมต่อไม่ได้: {exc}"
+                last_detail = f"เชื่อมต่อ Gemini ไม่ได้: {exc}"
+                last_friendly = (
+                    "เชื่อมต่อระบบ AI ไม่ได้ รบกวนตรวจอินเทอร์เน็ตแล้วลองใหม่นะครับ"
+                )
                 if attempt == _MAX_ATTEMPTS:
                     break
             else:
                 if resp.status_code < 400:
                     return resp.json()
 
-                last_error = f"Gemini ตอบกลับ {resp.status_code}: {resp.text[:300]}"
-                # 4xx อื่น ๆ (เช่น key ผิด, โมเดลไม่มี) ลองใหม่ก็ไม่ช่วย
+                last_detail = f"Gemini ตอบกลับ {resp.status_code}: {resp.text[:300]}"
+                last_friendly = _friendly_message(resp.status_code, resp.text)
+
+                # 4xx อื่น ๆ (key ผิด, โมเดลไม่มี) ลองใหม่ก็ไม่ช่วย
                 if resp.status_code not in _RETRY_STATUS or attempt == _MAX_ATTEMPTS:
                     break
 
-            wait = _BACKOFF_BASE ** attempt
+                # Gemini บอกเองว่าควรรอกี่วินาที — เชื่อค่านั้น แต่ไม่รอนานเกินไป
+                suggested = _retry_after(resp.text)
+                if suggested is not None:
+                    wait = min(suggested, _MAX_RETRY_WAIT)
+
             log.warning(
                 "Gemini ล้มเหลว (ครั้งที่ %d/%d) — รอ %.1f วินาทีแล้วลองใหม่: %s",
-                attempt, _MAX_ATTEMPTS, wait, last_error[:120],
+                attempt, _MAX_ATTEMPTS, wait, last_detail[:120],
             )
             time.sleep(wait)
 
-    raise LLMError(last_error or "เรียก Gemini ไม่สำเร็จ")
+    raise LLMError(last_detail, last_friendly)
 
 
 def build_context(hits: list) -> str:
@@ -96,7 +158,11 @@ def build_context(hits: list) -> str:
 def generate_answer(question: str, hits: list, history: list[dict] | None = None) -> str:
     if not config.has_api_key():
         raise LLMError(
-            "ยังไม่ได้ตั้งค่า GEMINI_API_KEY — ระบบจะแสดงเฉพาะข้อความที่ค้นเจอให้ก่อน"
+            "ยังไม่ได้ตั้งค่า GEMINI_API_KEY — ระบบทำงานในโหมดค้นหาเท่านั้น",
+            friendly=(
+                "ระบบยังไม่ได้เชื่อมต่อ AI สำหรับสรุปคำตอบ (รบกวนแจ้งผู้ดูแลระบบ) "
+                "รบกวนอ่านจากเอกสารด้านล่าง หรือสอบถามเจ้าหน้าที่โดยตรงนะครับ"
+            ),
         )
 
     context = build_context(hits) or "(ไม่พบเอกสารที่เกี่ยวข้อง)"
