@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 import csv
+import logging
 import re
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,7 +46,9 @@ def load_pdf(path: Path) -> list[RawSection]:
     from pypdf import PdfReader
 
     sections: list[RawSection] = []
+    images: list[tuple[str, bytes]] = []
     reader = PdfReader(str(path))
+
     for page_no, page in enumerate(reader.pages, start=1):
         try:
             text = clean_text(page.extract_text() or "")
@@ -52,6 +58,16 @@ def load_pdf(path: Path) -> list[RawSection]:
             sections.append(
                 RawSection(text=text, source=path.name, locator=f"หน้า {page_no}")
             )
+
+        # หน้าที่ข้อความน้อยผิดปกติ มักเป็นสแกนหรือแปะตารางเป็นรูป — เก็บรูปไว้อ่านด้วย Vision
+        if len(text) < 120:
+            try:
+                for img in page.images:
+                    images.append((f"หน้า{page_no}-{img.name}", img.data))
+            except Exception as exc:  # noqa: BLE001
+                log.debug("ดึงรูปจากหน้า %d ของ %s ไม่ได้: %s", page_no, path.name, exc)
+
+    sections.extend(_sections_from_images(images, path.name))
     return sections
 
 
@@ -102,7 +118,43 @@ def load_docx(path: Path) -> list[RawSection]:
                     text=rendered, source=path.name, locator=f"ตารางที่ {t_idx}"
                 )
             )
+
+    # รูปภาพที่ฝังใน Word — เอกสารอบรมมักแปะตารางเป็นรูป ต้องอ่านด้วย Vision
+    sections.extend(_sections_from_images(_docx_images(path), path.name))
     return sections
+
+
+def _docx_images(path: Path) -> list[tuple[str, bytes]]:
+    """ดึงไฟล์รูปที่ฝังใน .docx ออกมา (docx เป็น zip อยู่แล้ว)"""
+    images: list[tuple[str, bytes]] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in sorted(archive.namelist()):
+                if name.startswith("word/media/"):
+                    images.append((name.rsplit("/", 1)[-1], archive.read(name)))
+    except (zipfile.BadZipFile, OSError) as exc:
+        log.warning("ดึงรูปจาก %s ไม่ได้: %s", path.name, exc)
+    return images
+
+
+def _sections_from_images(
+    images: list[tuple[str, bytes]], source: str
+) -> list[RawSection]:
+    """ส่งรูปไปให้ Gemini Vision ถอดข้อความ แล้วห่อเป็น RawSection"""
+    if not images:
+        return []
+
+    from .vision import transcribe  # import ที่นี่เพื่อเลี่ยง circular import
+
+    return [
+        RawSection(
+            text=clean_text(text),
+            source=source,
+            locator=f"รูปภาพ {name}",
+            meta={"from_image": True},
+        )
+        for name, text in transcribe(images)
+    ]
 
 
 def _render_table(rows: list[list[str]]) -> str:

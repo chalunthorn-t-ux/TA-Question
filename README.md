@@ -1,11 +1,16 @@
-# 🎓 TA Assistant — เว็บตอบคำถามผู้ช่วยสอนใหม่ (RAG + Gemini)
+# 🎓 TA Assistant — เว็บตอบคำถามสำหรับ TA ใหม่ (RAG + Gemini)
 
 เว็บแอปถาม-ตอบที่ตอบจาก **เอกสารจริงขององค์กร** เท่านั้น พร้อมแสดงแหล่งอ้างอิงทุกคำตอบ
-เพื่อให้ TA ใหม่ตรวจสอบย้อนกลับได้ ไม่ต้องเชื่อ AI แบบตาบอด
+เพื่อให้ TA (Training Assistant) คนใหม่ตรวจสอบย้อนกลับได้ ไม่ต้องเชื่อ AI แบบตาบอด
 
 ```
 คำถาม ─▶ embed ─▶ ค้น hybrid (semantic + keyword) ─▶ context 5 อันดับ ─▶ Gemini ─▶ คำตอบ + [1][2][3]
 ```
+
+> **บริบทที่ prompt ตั้งไว้** — สถาบันฝึกอบรม 9Expert Training: คลาส Public / In-house,
+> เกณฑ์วุฒิบัตร, การประเมิน Attendance, แบบประเมิน, สิทธิ์เรียนซ้ำ
+> ถ้าจะเอาไปใช้ที่อื่น แก้ `SYSTEM_PROMPT` ใน [`app/rag/llm.py`](app/rag/llm.py)
+> และปุ่มคำถามแนะนำใน [`templates/index.html`](templates/index.html)
 
 ---
 
@@ -54,12 +59,15 @@ C:\Knowleage\
 │       ├── chunker.py     ตัด chunk แบบ recursive (รองรับภาษาไทย)
 │       ├── embedder.py    Gemini embedding + fallback แบบ local
 │       ├── store.py       vector store + ค้นแบบ hybrid (cosine + BM25)
-│       ├── llm.py         prompt + เรียก Gemini generateContent
+│       ├── vision.py      อ่านตาราง/ภาพในเอกสารด้วย Gemini Vision (+ cache)
+│       ├── llm.py         prompt + เรียก Gemini generateContent (retry อัตโนมัติ)
 │       └── pipeline.py    ingest() และ ask()
 ├── templates/index.html   หน้าเว็บ
 ├── static/css|js/         ธีมและ logic ฝั่ง client
-├── data/                  📥 วางเอกสารต้นฉบับที่นี่
-├── storage/               📦 index ที่สร้างแล้ว (vectors.npy + index.json)
+├── data/                  📥 เอกสารจริง — gitignore ไว้ ไม่ขึ้น repo
+├── source-pdf/            📄 PDF สำรอง — ไม่ index (ดูหัวข้อ Word vs PDF)
+├── samples/               🧪 ข้อมูลสมมติสำหรับ demo — ขึ้น repo ได้
+├── storage/               📦 index + vision cache (สร้างใหม่ได้ ไม่ขึ้น repo)
 ├── scripts/ingest.py      สร้าง index จาก CLI
 └── run.ps1                ติดตั้ง + รันในคำสั่งเดียว
 ```
@@ -124,12 +132,36 @@ loader จะจับคู่ให้ 1 แถว = 1 chunk ทำให้�
 
 | นามสกุล | วิธีอ่าน |
 |---|---|
-| `.pdf` | pypdf — แยกทีละหน้า อ้างอิงเป็น "หน้า N" |
-| `.docx` | python-docx — จัดกลุ่มตาม Heading + แปลงตารางเป็น `หัวคอลัมน์: ค่า` |
+| `.docx` | python-docx — จัดกลุ่มตาม Heading + แปลงตารางเป็น `หัวคอลัมน์: ค่า` + **อ่านรูปที่ฝังด้วย Vision** |
+| `.pdf` | pypdf — แยกทีละหน้า อ้างอิงเป็น "หน้า N" + อ่านรูปในหน้าที่ข้อความน้อยกว่า 120 ตัวอักษร |
 | `.xlsx` `.xls` `.csv` | openpyxl / xlrd / csv — 1 แถว = 1 chunk |
 | `.md` `.txt` | ตัดตามหัวข้อ `#` |
 
-ไฟล์สแกน (PDF รูปภาพ) จะได้ข้อความว่าง — ต้อง OCR ก่อน
+### ⚠️ Word ดีกว่า PDF สำหรับภาษาไทย — ทดสอบแล้ว
+
+PDF ที่สร้างจาก Word มักทำ **สระอำและวรรณยุกต์หลุด** เพราะ font encoding
+ทำให้ทั้งการค้นและคำตอบเพี้ยน เทียบจากเอกสารเดียวกัน:
+
+| รูปแบบ | ข้อความที่สกัดได้ |
+|---|---|
+| PDF | `ต้องท า Workshop` · `ส ำหรับ กำรท ำแบบประเมิน` · `เงื่อนไขค ำนวณเวลำอบรม` |
+| Word | `ต้องทำ Workshop` · `สำหรับ การทำแบบประเมิน` · `เงื่อนไขคำนวณเวลาอบรม` |
+
+**ถ้ามีทั้งสองรูปแบบ ให้ใส่แค่ `.docx` ใน `data/`** เก็บ PDF ไว้ที่อื่น
+(โปรเจกต์นี้ใช้ `source-pdf/`) ไม่งั้นเนื้อหาจะซ้ำและกินโควตา top-k ไปเปล่า ๆ
+
+### 👁️ อ่านตาราง/ภาพในเอกสารด้วย Gemini Vision
+
+เอกสารอบรมมักแปะตารางเป็น **รูปภาพ** ซึ่งสกัดเป็นข้อความไม่ได้เลย
+[`app/rag/vision.py`](app/rag/vision.py) จะดึงรูปออกมาส่งให้ Gemini ถอดเป็นตาราง Markdown ตอน ingest
+
+ตัวอย่างจริงในโปรเจกต์นี้ — `เงื่อนไขคำนวณเวลาอบรม.docx` มีข้อความแค่ 76 ตัวอักษร
+แต่ตารางเกณฑ์ 80% ทั้งตารางเป็น PNG ขนาด 122 KB ถ้าไม่มี Vision ระบบจะตอบคำถาม
+"อบรม 3 วัน ขาดได้กี่ชั่วโมง" ไม่ได้เลย
+
+- ผลการถอดถูก **cache** ไว้ที่ `storage/vision_cache.json` (key = sha256 ของรูป) ingest ซ้ำไม่เสียเงินอีก
+- ข้ามรูปเล็กกว่า 8 KB (ไอคอน/โลโก้) และจำกัดไม่เกิน 12 รูปต่อไฟล์ กันค่า API พุ่ง
+- ไม่มี API key ก็ยัง ingest ข้อความปกติได้ แค่ข้ามรูป
 
 ---
 
