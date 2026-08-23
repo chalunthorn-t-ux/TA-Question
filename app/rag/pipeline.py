@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +81,9 @@ def ingest(data_dir: Path | None = None) -> dict:
 
 # --------------------------------------------------------------------------- #
 def ask(question: str, history: list[dict] | None = None, top_k: int | None = None) -> dict:
+    # จับเวลาตั้งแต่ต้น เพื่อไม่ให้ใช้เกินเพดานของ serverless แล้วถูกตัดทิ้ง (504)
+    deadline = time.monotonic() + config.REQUEST_BUDGET_SECONDS
+
     question = (question or "").strip()
     if not question:
         return {"answer": "กรุณาพิมพ์คำถามก่อนนะครับ", "sources": [], "status": "empty_question"}
@@ -112,7 +116,7 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
     ]
 
     try:
-        answer = llm.generate_answer(question, relevant, history)
+        answer = llm.generate_answer(question, relevant, history, deadline)
         status = "ok"
     except llm.LLMError as exc:
         # สรุปคำตอบไม่ได้ (โควตาหมด / Gemini ล่ม / ยังไม่มี key)

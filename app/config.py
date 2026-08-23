@@ -57,6 +57,16 @@ GEMINI_EMBED_MODEL = _str("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 GEMINI_EMBED_DIM = _int("GEMINI_EMBED_DIM", 768)
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
+# โมเดล gemini-3.x "คิด" ก่อนตอบ ซึ่งกินเวลาส่วนใหญ่ (วัดได้ ~1,300 tokens = ~11 วินาที)
+# จำกัดไว้ให้เร็วขึ้นโดยคำตอบยังครบ ตั้ง -1 เพื่อไม่ส่งค่านี้ (ปล่อยให้โมเดลตัดสินใจเอง)
+GEMINI_THINKING_BUDGET = _int("GEMINI_THINKING_BUDGET", 512)
+
+# ---- งบเวลาต่อคำถาม ----
+# serverless มีเพดานเวลา ถ้าเลยแล้วจะถูกตัดทิ้งกลางทาง ผู้ใช้ไม่ได้อะไรเลย (504)
+# ตั้งงบให้ต่ำกว่าเพดานจริง เพื่อให้ระบบยอมแพ้ทันแล้วคืนข้อความจากเอกสารให้อ่านแทน
+# ต้องน้อยกว่า maxDuration ใน vercel.json
+REQUEST_BUDGET_SECONDS = _int("REQUEST_BUDGET_SECONDS", 45)
+
 # ---- RAG ----
 CHUNK_SIZE = _int("CHUNK_SIZE", 900)
 CHUNK_OVERLAP = _int("CHUNK_OVERLAP", 150)

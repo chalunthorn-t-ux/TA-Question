@@ -20,6 +20,9 @@ _MAX_ATTEMPTS = 4
 _BACKOFF_BASE = 1.5
 _MAX_RETRY_WAIT = 30.0   # ถ้า Gemini บอกให้รอนานกว่านี้ ไม่คุ้มให้ผู้ใช้นั่งรอ
 
+# เวลาน้อยกว่านี้ไม่พอให้ Gemini ตอบจบ (วัดจริงได้ ~9-13 วินาที) ยิงไปก็เสียเปล่า
+_MIN_CALL_SECONDS = 8.0
+
 SYSTEM_PROMPT = """คุณคือ "พี่เลี้ยง TA" ผู้ช่วยตอบคำถามสำหรับ TA (Training Assistant) คนใหม่
 ของสถาบันฝึกอบรม 9Expert Training
 
@@ -96,8 +99,18 @@ def _retry_after(body: str) -> float | None:
     return None
 
 
-def _post_with_retry(url: str, payload: dict) -> dict:
-    """ยิง request พร้อม exponential backoff สำหรับ error ที่ลองใหม่ได้"""
+_TIMEOUT_FRIENDLY = (
+    "ระบบใช้เวลาประมวลผลนานเกินกำหนดครับ รบกวนถามใหม่อีกครั้ง "
+    "หรือถามให้สั้นลง — ถ้าเร่งด่วนสอบถามเจ้าหน้าที่โดยตรงได้เลยนะครับ"
+)
+
+
+def _post_with_retry(url: str, payload: dict, deadline: float | None = None) -> dict:
+    """ยิง request พร้อม retry — แต่ไม่ยิงเกินเวลาที่เหลือ (deadline)
+
+    บน serverless ถ้าใช้เวลาเกินเพดาน ฟังก์ชันถูกตัดทิ้งกลางทาง ผู้ใช้ได้ 504 เปล่า ๆ
+    การยอมแพ้ก่อนแล้วคืนข้อความจากเอกสารให้อ่าน มีประโยชน์กว่ามาก
+    """
     headers = {
         "x-goog-api-key": config.GEMINI_API_KEY,
         "Content-Type": "application/json",
@@ -105,12 +118,25 @@ def _post_with_retry(url: str, payload: dict) -> dict:
     last_detail = "เรียก Gemini ไม่สำเร็จ"
     last_friendly: str | None = None
 
+    def remaining() -> float:
+        return float("inf") if deadline is None else deadline - time.monotonic()
+
     with httpx.Client(timeout=_TIMEOUT) as client:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
-            wait = _BACKOFF_BASE ** attempt
+            left = remaining()
+            if left <= _MIN_CALL_SECONDS:
+                log.warning("เวลาเหลือ %.1f วินาที ไม่พอเรียก Gemini — ยอมแพ้", left)
+                raise LLMError(
+                    f"หมดงบเวลาก่อนเรียก Gemini (เหลือ {left:.1f} วินาที)",
+                    _TIMEOUT_FRIENDLY,
+                )
 
             try:
-                resp = client.post(url, headers=headers, json=payload)
+                # ไม่ให้ request เดียวกินเวลาเกินที่เหลือ
+                resp = client.post(
+                    url, headers=headers, json=payload,
+                    timeout=httpx.Timeout(min(left, _TIMEOUT.read or 90.0), connect=10.0),
+                )
             except httpx.RequestError as exc:
                 last_detail = f"เชื่อมต่อ Gemini ไม่ได้: {exc}"
                 last_friendly = (
@@ -118,6 +144,7 @@ def _post_with_retry(url: str, payload: dict) -> dict:
                 )
                 if attempt == _MAX_ATTEMPTS:
                     break
+                wait = _BACKOFF_BASE ** attempt
             else:
                 if resp.status_code < 400:
                     return resp.json()
@@ -131,8 +158,16 @@ def _post_with_retry(url: str, payload: dict) -> dict:
 
                 # Gemini บอกเองว่าควรรอกี่วินาที — เชื่อค่านั้น แต่ไม่รอนานเกินไป
                 suggested = _retry_after(resp.text)
-                if suggested is not None:
-                    wait = min(suggested, _MAX_RETRY_WAIT)
+                wait = min(suggested, _MAX_RETRY_WAIT) if suggested is not None \
+                    else _BACKOFF_BASE ** attempt
+
+            # รอแล้วจะไม่เหลือเวลายิงใหม่ ก็ไม่ต้องรอ
+            if wait + _MIN_CALL_SECONDS > remaining():
+                log.warning(
+                    "เวลาเหลือ %.1f วินาที ไม่พอรอ %.1f วินาทีแล้วลองใหม่ — ยอมแพ้",
+                    remaining(), wait,
+                )
+                break
 
             log.warning(
                 "Gemini ล้มเหลว (ครั้งที่ %d/%d) — รอ %.1f วินาทีแล้วลองใหม่: %s",
@@ -155,7 +190,12 @@ def build_context(hits: list) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def generate_answer(question: str, hits: list, history: list[dict] | None = None) -> str:
+def generate_answer(
+    question: str,
+    hits: list,
+    history: list[dict] | None = None,
+    deadline: float | None = None,
+) -> str:
     if not config.has_api_key():
         raise LLMError(
             "ยังไม่ได้ตั้งค่า GEMINI_API_KEY — ระบบทำงานในโหมดค้นหาเท่านั้น",
@@ -189,17 +229,22 @@ def generate_answer(question: str, hits: list, history: list[dict] | None = None
     )
 
     url = f"{config.GEMINI_BASE_URL}/models/{config.GEMINI_CHAT_MODEL}:generateContent"
+    generation: dict = {
+        "temperature": 0.2,
+        "topP": 0.9,
+        # maxOutputTokens นับรวม thinking tokens ด้วย ตั้งต่ำเกินคำตอบจะถูกตัดกลางประโยค
+        "maxOutputTokens": 2048,
+    }
+    if config.GEMINI_THINKING_BUDGET >= 0:
+        generation["thinkingConfig"] = {"thinkingBudget": config.GEMINI_THINKING_BUDGET}
+
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": contents,
-        "generationConfig": {
-            "temperature": 0.2,
-            "topP": 0.9,
-            "maxOutputTokens": 2048,
-        },
+        "generationConfig": generation,
     }
 
-    data = _post_with_retry(url, payload)
+    data = _post_with_retry(url, payload, deadline)
     candidates = data.get("candidates") or []
     if not candidates:
         raise LLMError("Gemini ไม่ส่งคำตอบกลับมา (อาจถูกกรองด้วย safety filter)")
