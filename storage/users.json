@@ -2,7 +2,7 @@
   "version": 1,
   "users": {
     "chalunthorn-t": {
-      "password": "pbkdf2_sha256$210000$ac063021612d4055647a38d7fc408a1a$9899a6c7eb56986253888ea5bcca8e9594bf5375fb076ee68842d869bb1f3cd3",
+      "password": "pbkdf2_sha256$210000$7ae2bfcb6b007e9a8d5a6aecdb9f4687$c4f36a76e6e885559a6632eb7ed361049a5dc475c0876b5a2705289d9a2e2728",
       "role": "admin",
       "created_at": "2026-08-23T14:07:28+00:00",
       "last_login": ""
