@@ -32,8 +32,14 @@ INDEX_DIR = BASE_DIR / "storage"      # เก็บ index ที่สร้า
 STATIC_DIR = BASE_DIR / "static"
 TEMPLATE_DIR = BASE_DIR / "templates"
 
+# สร้างโฟลเดอร์ให้ถ้ายังไม่มี — แต่บน serverless (Vercel) ดิสก์อ่านได้เท่านั้น
+# ต้องไม่ให้ล้มตอน import ไม่งั้นแอปไม่ขึ้นเลย
+READ_ONLY_FS = False
 for _d in (DATA_DIR, INDEX_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
+    try:
+        _d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        READ_ONLY_FS = True
 
 # ---- Gemini ----
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -54,6 +60,9 @@ HYBRID_ALPHA = _float("HYBRID_ALPHA", 0.7)
 SESSION_MAX_AGE = _int("SESSION_MAX_AGE", 7 * 24 * 3600)
 # ตั้งเป็น 1 เมื่อ deploy บน https (Vercel) เพื่อไม่ให้คุกกี้ส่งผ่าน http
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "").strip() in ("1", "true", "yes")
+
+# หน้า /docs /redoc เปิดดูได้โดยไม่ต้องล็อกอิน จึงปิดไว้เป็นค่าเริ่มต้น
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip() in ("1", "true", "yes")
 
 # ---- UI ----
 APP_TITLE = os.getenv("APP_TITLE", "TA Assistant")

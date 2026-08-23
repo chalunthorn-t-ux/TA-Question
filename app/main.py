@@ -47,7 +47,17 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title=config.APP_TITLE, version="0.2.0", lifespan=lifespan)
+# ปิดหน้า /docs /redoc /openapi.json ตอน production
+# เพราะเปิดดูได้โดยไม่ต้องล็อกอิน = เผยโครง API ให้คนนอกเห็น
+# เปิดกลับได้ด้วย ENABLE_DOCS=1 เวลาพัฒนา
+app = FastAPI(
+    title=config.APP_TITLE,
+    version="0.2.0",
+    lifespan=lifespan,
+    docs_url="/docs" if config.ENABLE_DOCS else None,
+    redoc_url="/redoc" if config.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if config.ENABLE_DOCS else None,
+)
 
 # คุกกี้ session — https_only ปิดไว้เพราะรันในเครื่องเป็น http
 # ถ้า deploy ขึ้น Vercel (https) ให้ตั้ง SESSION_HTTPS_ONLY=1 ใน environment
