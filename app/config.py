@@ -49,6 +49,12 @@ TOP_K = _int("TOP_K", 5)
 MIN_SCORE = _float("MIN_SCORE", 0.15)
 HYBRID_ALPHA = _float("HYBRID_ALPHA", 0.7)
 
+# ---- Session / ความปลอดภัย ----
+# อายุคุกกี้ล็อกอิน (วินาที) ค่าเริ่มต้น 7 วัน
+SESSION_MAX_AGE = _int("SESSION_MAX_AGE", 7 * 24 * 3600)
+# ตั้งเป็น 1 เมื่อ deploy บน https (Vercel) เพื่อไม่ให้คุกกี้ส่งผ่าน http
+SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "").strip() in ("1", "true", "yes")
+
 # ---- UI ----
 APP_TITLE = os.getenv("APP_TITLE", "TA Assistant")
 APP_SUBTITLE = os.getenv("APP_SUBTITLE", "ผู้ช่วยตอบคำถามสำหรับผู้ช่วยสอนใหม่")

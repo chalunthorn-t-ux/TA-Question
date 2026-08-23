@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% if mode == 'register' %}สมัครสมาชิก{% else %}เข้าสู่ระบบ{% endif %} · {{ title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
+</head>
+<body class="auth-body">
+
+<main class="auth">
+  <div class="auth__card">
+
+    <div class="auth__brand">
+      <div class="brand__logo">TA</div>
+      <div>
+        <h1>{{ title }}</h1>
+        <p>{{ subtitle }}</p>
+      </div>
+    </div>
+
+    {% if first_user %}
+    <div class="auth__notice auth__notice--first">
+      <strong>🎉 ยังไม่มีใครในระบบ</strong>
+      <span>บัญชีแรกที่สมัครจะได้สิทธิ์ <b>ผู้ดูแลระบบ (Admin)</b> โดยอัตโนมัติ
+            ซึ่งเป็นคนเดียวที่อัปโหลดเอกสารและสร้าง Index ได้</span>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="auth__notice auth__notice--error">
+      <strong>⚠️ {{ error }}</strong>
+    </div>
+    {% endif %}
+
+    {% if mode == 'register' %}
+    <!-- ══════════ สมัครสมาชิก ══════════ -->
+    <form method="post" action="/register" class="auth__form" autocomplete="off">
+      <h2>สมัครสมาชิก</h2>
+
+      <label class="field">
+        <span class="field__label">ชื่อผู้ใช้</span>
+        <input type="text" name="username" value="{{ username }}" required
+               minlength="3" maxlength="32" pattern="[a-zA-Z0-9._\-]+"
+               placeholder="เช่น teena.s" autocomplete="username" autofocus />
+        <span class="field__hint">ใช้ได้เฉพาะ a-z 0-9 จุด ขีดกลาง ขีดล่าง</span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">รหัสผ่าน</span>
+        <input type="password" name="password" required
+               minlength="{{ min_password }}" maxlength="128"
+               placeholder="อย่างน้อย {{ min_password }} ตัวอักษร" autocomplete="new-password" />
+        <span class="field__hint">ผสมตัวอักษรกับตัวเลข เพื่อให้เดายากขึ้น</span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">ยืนยันรหัสผ่าน</span>
+        <input type="password" name="confirm" required
+               minlength="{{ min_password }}" maxlength="128"
+               placeholder="พิมพ์รหัสผ่านเดิมอีกครั้ง" autocomplete="new-password" />
+      </label>
+
+      <button type="submit" class="btn btn--primary btn--block">สมัครสมาชิก</button>
+
+      <p class="auth__switch">
+        มีบัญชีอยู่แล้ว? <a href="/login">เข้าสู่ระบบ</a>
+      </p>
+    </form>
+
+    {% else %}
+    <!-- ══════════ เข้าสู่ระบบ ══════════ -->
+    <form method="post" action="/login" class="auth__form">
+      <h2>เข้าสู่ระบบ</h2>
+
+      <label class="field">
+        <span class="field__label">ชื่อผู้ใช้</span>
+        <input type="text" name="username" value="{{ username }}" required
+               autocomplete="username" autofocus />
+      </label>
+
+      <label class="field">
+        <span class="field__label">รหัสผ่าน</span>
+        <input type="password" name="password" required autocomplete="current-password" />
+      </label>
+
+      <button type="submit" class="btn btn--primary btn--block">เข้าสู่ระบบ</button>
+
+      <p class="auth__switch">
+        ยังไม่มีบัญชี? <a href="/register">สมัครสมาชิก</a>
+      </p>
+    </form>
+    {% endif %}
+
+  </div>
+
+  <p class="auth__foot">
+    ระบบนี้มีข้อมูลภายในของสถาบัน กรุณาไม่เผยแพร่บัญชีหรือ URL ให้บุคคลภายนอก
+  </p>
+</main>
+
+</body>
+</html>

@@ -51,6 +51,7 @@
     <div class="side-block">
       <h2 class="side-block__title">คลังข้อมูล</h2>
 
+      {% if can_manage %}
       <label class="dropzone" id="dropzone">
         <input type="file" id="file-input" multiple
                accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md" hidden />
@@ -66,6 +67,7 @@
         <span class="btn__label">สร้าง Index</span>
         <span class="spinner" hidden></span>
       </button>
+      {% endif %}
 
       <ul class="file-list" id="file-list">
         {% for s in sources %}
@@ -85,6 +87,24 @@
 
     <div class="side-block side-block--footer">
       <button class="btn btn--ghost" id="btn-clear">ล้างบทสนทนา</button>
+
+      <div class="user-chip">
+        <div class="user-chip__avatar">{{ user.username[0] }}</div>
+        <div class="user-chip__meta">
+          <span class="user-chip__name">{{ user.username }}</span>
+          <span class="user-chip__role">
+            {% if user.is_admin %}ผู้ดูแลระบบ{% else %}สมาชิก{% endif %}
+          </span>
+        </div>
+        <form method="post" action="/logout">
+          <button type="submit" class="logout-btn" title="ออกจากระบบ" aria-label="ออกจากระบบ">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+              <path d="M15 17l5-5-5-5M20 12H9M12 3H5a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h7"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+      </div>
     </div>
   </aside>
 

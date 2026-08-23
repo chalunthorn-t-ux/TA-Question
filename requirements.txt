@@ -1,4 +1,4 @@
-# ---- Core web ----
+﻿# ---- Core web ----
 fastapi>=0.115
 uvicorn[standard]>=0.34
 jinja2>=3.1
@@ -6,6 +6,7 @@ python-multipart>=0.0.20
 pydantic>=2.10
 python-dotenv>=1.0
 httpx>=0.28
+itsdangerous>=2.2         # เซ็นคุกกี้ session (SessionMiddleware)
 
 # ---- Document loaders ----
 pypdf>=5.1              # PDF

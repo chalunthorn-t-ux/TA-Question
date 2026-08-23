@@ -483,6 +483,146 @@ body {
 .scrim.is-on { display: block; }
 
 /* ══════════════════════════════════════════════════════════════
+   หน้าเข้าสู่ระบบ / สมัครสมาชิก
+   ══════════════════════════════════════════════════════════════ */
+.auth-body {
+  background: linear-gradient(165deg, var(--navy) 0%, #0C1B52 58%, var(--navy-700) 100%);
+  min-height: 100vh;
+}
+
+.auth {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 16px;
+  padding: 32px 20px;
+  position: relative;
+}
+
+.auth::before {
+  content: "";
+  position: absolute;
+  top: -160px; right: -160px;
+  width: 460px; height: 460px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(171, 210, 250, .22), transparent 68%);
+  pointer-events: none;
+}
+
+.auth__card {
+  width: 100%; max-width: 430px;
+  background: var(--cream);
+  border-radius: var(--r-xl);
+  padding: 34px 32px 30px;
+  box-shadow: var(--shadow-lg);
+  position: relative;
+  animation: rise .38s ease both;
+}
+
+.auth__brand {
+  display: flex; align-items: center; gap: 13px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.auth__brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+.auth__brand p  { font-size: 11.5px; color: var(--ink-muted); line-height: 1.45; }
+
+.auth__notice {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 13px 15px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  margin-bottom: 18px;
+  border-left: 3px solid var(--primary);
+  background: var(--primary-faint);
+}
+.auth__notice strong { font-weight: 600; font-size: 13px; }
+.auth__notice span   { color: var(--ink-muted); line-height: 1.55; }
+.auth__notice--first { border-left-color: var(--ok); background: rgba(46, 125, 91, .08); }
+.auth__notice--error { border-left-color: var(--danger); background: rgba(179, 64, 47, .08); }
+.auth__notice--error strong { color: var(--danger); }
+
+.auth__form { display: flex; flex-direction: column; gap: 15px; }
+.auth__form h2 { font-size: 16px; font-weight: 700; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field__label { font-size: 12.5px; font-weight: 600; }
+.field__hint  { font-size: 11px; color: var(--ink-faint); }
+
+.field input {
+  font-family: inherit; font-size: 14px;
+  color: var(--ink);
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--white);
+  outline: none;
+  transition: border-color .16s, box-shadow .16s;
+  width: 100%;
+}
+.field input::placeholder { color: var(--ink-faint); }
+.field input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3.5px var(--primary-faint);
+}
+.field input:invalid:not(:placeholder-shown):not(:focus) { border-color: var(--danger); }
+
+.btn--block { width: 100%; margin-top: 4px; padding: 13px; }
+
+.auth__switch {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.auth__switch a { color: var(--navy); font-weight: 600; text-decoration: none; }
+.auth__switch a:hover { text-decoration: underline; }
+
+.auth__foot {
+  font-size: 11.5px;
+  color: rgba(255, 247, 235, .55);
+  text-align: center;
+  max-width: 400px;
+}
+
+/* ── แถบผู้ใช้ในหน้าหลัก ── */
+.user-chip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--r-md);
+  background: rgba(255, 247, 235, .07);
+  border: 1px solid rgba(171, 210, 250, .16);
+}
+.user-chip__avatar {
+  width: 30px; height: 30px; flex: 0 0 30px;
+  border-radius: 9px;
+  background: var(--primary); color: var(--navy);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase;
+}
+.user-chip__meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.user-chip__name {
+  font-size: 12.5px; font-weight: 600; color: var(--cream);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.user-chip__role { font-size: 10.5px; color: rgba(171, 210, 250, .78); }
+
+.logout-btn {
+  flex: 0 0 auto;
+  width: 30px; height: 30px;
+  padding: 7px;
+  border: none; border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 247, 235, .58);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.logout-btn:hover { background: rgba(255, 247, 235, .1); color: var(--cream); }
+.logout-btn svg { width: 100%; height: 100%; }
+
+/* ══════════════════════════════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {

@@ -168,6 +168,20 @@
 
   /* ──────────────────────── ถาม-ตอบ ──────────────────────── */
 
+  /** session หมดอายุหรือถูกถอนสิทธิ์ -> ส่งกลับหน้า login แทนที่จะเงียบหาย */
+  function handleAuthError(res) {
+    if (res.status === 401) {
+      toast("เซสชันหมดอายุ — กำลังพากลับไปหน้าเข้าสู่ระบบ", "warn", 2500);
+      setTimeout(() => (location.href = "/login"), 1200);
+      return true;
+    }
+    if (res.status === 403) {
+      toast("บัญชีของคุณไม่มีสิทธิ์ทำรายการนี้ (เฉพาะผู้ดูแลระบบ)", "error", 5000);
+      return true;
+    }
+    return false;
+  }
+
   function setBusy(state) {
     busy = state;
     el.send.disabled = state;
@@ -191,6 +205,8 @@
       });
 
       typing.remove();
+
+      if (handleAuthError(res)) return;
 
       if (!res.ok) {
         const detail = await res.text();
@@ -238,6 +254,7 @@
   async function loadStatus() {
     try {
       const res = await fetch("/api/status");
+      if (res.status === 401) { location.href = "/login"; return; }
       if (res.ok) refreshStatus(await res.json());
     } catch { /* เงียบไว้ — ไม่ใช่ error ที่ผู้ใช้ต้องรู้ */ }
   }
@@ -253,6 +270,7 @@
 
     try {
       const res = await fetch("/api/ingest", { method: "POST" });
+      if (handleAuthError(res)) return;
       const data = await res.json();
 
       if (res.ok && data.ok) {
@@ -286,6 +304,7 @@
     toast(`กำลังอัปโหลด ${files.length} ไฟล์…`, "ok", 2500);
     try {
       const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (handleAuthError(res)) return;
       const data = await res.json();
 
       if (!res.ok) {
@@ -330,8 +349,6 @@
   document.querySelectorAll(".suggest").forEach((btn) =>
     btn.addEventListener("click", () => ask(btn.dataset.q)));
 
-  el.ingest.addEventListener("click", runIngest);
-
   el.clear.addEventListener("click", () => {
     history = [];
     el.chat.querySelectorAll(".msg").forEach((n) => n.remove());
@@ -340,28 +357,33 @@
     toast("ล้างบทสนทนาแล้ว", "ok", 2200);
   });
 
-  // ── dropzone ──
-  el.dropzone.addEventListener("click", () => el.fileInput.click());
-  el.fileInput.addEventListener("change", (e) => {
-    uploadFiles(e.target.files);
-    e.target.value = "";
-  });
-  ["dragenter", "dragover"].forEach((ev) =>
-    el.dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      el.dropzone.classList.add("is-over");
-    }));
-  ["dragleave", "drop"].forEach((ev) =>
-    el.dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      el.dropzone.classList.remove("is-over");
-    }));
-  el.dropzone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer?.files));
-  // กันเบราว์เซอร์เปิดไฟล์แทนเมื่อวางผิดที่
-  ["dragover", "drop"].forEach((ev) =>
-    document.addEventListener(ev, (e) => {
-      if (!el.dropzone.contains(e.target)) e.preventDefault();
-    }));
+  // ── อัปโหลดเอกสารและสร้าง Index — มีแค่ตอนล็อกอินเป็น admin ──
+  // สมาชิกทั่วไปจะไม่มีปุ่มเหล่านี้ในหน้า จึงต้องเช็คก่อนผูก event
+  if (el.ingest) el.ingest.addEventListener("click", runIngest);
+
+  if (el.dropzone && el.fileInput) {
+    el.dropzone.addEventListener("click", () => el.fileInput.click());
+    el.fileInput.addEventListener("change", (e) => {
+      uploadFiles(e.target.files);
+      e.target.value = "";
+    });
+    ["dragenter", "dragover"].forEach((ev) =>
+      el.dropzone.addEventListener(ev, (e) => {
+        e.preventDefault();
+        el.dropzone.classList.add("is-over");
+      }));
+    ["dragleave", "drop"].forEach((ev) =>
+      el.dropzone.addEventListener(ev, (e) => {
+        e.preventDefault();
+        el.dropzone.classList.remove("is-over");
+      }));
+    el.dropzone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer?.files));
+    // กันเบราว์เซอร์เปิดไฟล์แทนเมื่อวางผิดที่
+    ["dragover", "drop"].forEach((ev) =>
+      document.addEventListener(ev, (e) => {
+        if (!el.dropzone.contains(e.target)) e.preventDefault();
+      }));
+  }
 
   // ── sidebar บนมือถือ ──
   const openSidebar  = () => { el.sidebar.classList.add("is-open"); el.scrim.classList.add("is-on"); };
