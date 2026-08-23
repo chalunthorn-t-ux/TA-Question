@@ -311,4 +311,51 @@ async def api_users(user: auth.User = Depends(require_admin)):
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    """ตรวจสุขภาพระบบ — บอกว่าตั้งค่าอะไรครบ/ขาด โดยไม่เผยค่าความลับ
+
+    เปิดดูได้โดยไม่ต้องล็อกอิน เพราะต้องใช้ไล่ปัญหาตอน deploy
+    คืนเฉพาะ true/false และตัวเลข ไม่มีคีย์ ไม่มีชื่อคน
+    """
+    store = pipeline.get_store()
+    problems: list[str] = []
+
+    if not config.has_api_key():
+        problems.append("ยังไม่ได้ตั้ง GEMINI_API_KEY -> ตอบคำถามไม่ได้")
+    if not auth.has_session_secret():
+        problems.append(
+            "ยังไม่ได้ตั้ง SESSION_SECRET -> ล็อกอินไม่สำเร็จ (คุกกี้ใช้ต่อไม่ได้)"
+            if config.READ_ONLY_FS
+            else "ยังไม่ได้ตั้ง SESSION_SECRET -> ผู้ใช้จะหลุดออกจากระบบเมื่อรีสตาร์ท"
+        )
+    if not store.chunks:
+        problems.append("ไม่มี index -> ไม่มีความรู้ให้ตอบ")
+
+    # เช็คไฟล์ผู้ใช้เสียหายก่อน เพราะอาการจะเหมือน "ไม่มีใครสมัคร" ซึ่งชี้ผิดทาง
+    user_count = auth.user_count()
+    if auth.users_file_error:
+        problems.append(f"⚠️ {auth.users_file_error} -> ทุกคนล็อกอินไม่ได้")
+    elif not auth.has_any_user():
+        problems.append(
+            "ไม่มีบัญชีผู้ใช้ และเซิร์ฟเวอร์เขียนไฟล์ไม่ได้ -> สมัครสมาชิกไม่ได้"
+            if config.READ_ONLY_FS
+            else "ไม่มีบัญชีผู้ใช้ -> คนแรกที่สมัครจะได้สิทธิ์ admin"
+        )
+    if config.READ_ONLY_FS and not config.SESSION_HTTPS_ONLY:
+        problems.append("แนะนำให้ตั้ง SESSION_HTTPS_ONLY=1 เมื่อรันบน https")
+
+    return {
+        "status": "ok" if not problems else "misconfigured",
+        "checks": {
+            "gemini_api_key": config.has_api_key(),
+            "session_secret": auth.has_session_secret(),
+            "session_https_only": config.SESSION_HTTPS_ONLY,
+            "read_only_filesystem": config.READ_ONLY_FS,
+            "index_chunks": len(store.chunks),
+            "index_documents": len(store.sources()),
+            "embed_backend": store.backend,
+            "user_accounts": user_count,
+            "users_file_ok": not auth.users_file_error,
+            "chat_model": config.GEMINI_CHAT_MODEL,
+        },
+        "problems": problems,
+    }
