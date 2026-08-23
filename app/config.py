@@ -12,6 +12,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _str(key: str, default: str) -> str:
+    """อ่าน env var แบบถือว่า "ตั้งเป็นค่าว่าง" = ยังไม่ได้ตั้ง
+
+    บนบริการอย่าง Vercel เผลอสร้างตัวแปรทิ้งไว้โดยไม่ใส่ค่าได้ง่าย
+    ถ้าไม่ถอยไปใช้ค่าเริ่มต้น จะกลายเป็นเรียกโมเดลชื่อว่างเปล่าแล้วพังแบบงง ๆ
+    """
+    return (os.getenv(key) or "").strip() or default
+
+
 def _int(key: str, default: int) -> int:
     try:
         return int(os.getenv(key, "") or default)
@@ -43,8 +52,8 @@ for _d in (DATA_DIR, INDEX_DIR):
 
 # ---- Gemini ----
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.6-flash").strip()
-GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001").strip()
+GEMINI_CHAT_MODEL = _str("GEMINI_CHAT_MODEL", "gemini-3.6-flash")
+GEMINI_EMBED_MODEL = _str("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 GEMINI_EMBED_DIM = _int("GEMINI_EMBED_DIM", 768)
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -65,8 +74,8 @@ SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "").strip() in ("1", "true"
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip() in ("1", "true", "yes")
 
 # ---- UI ----
-APP_TITLE = os.getenv("APP_TITLE", "TA Assistant")
-APP_SUBTITLE = os.getenv("APP_SUBTITLE", "ผู้ช่วยตอบคำถามสำหรับผู้ช่วยสอนใหม่")
+APP_TITLE = _str("APP_TITLE", "TA Assistant")
+APP_SUBTITLE = _str("APP_SUBTITLE", "ผู้ช่วยตอบคำถามสำหรับ TA (Training Assistant) ใหม่")
 
 # ไฟล์ที่รองรับ
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt", ".md"}
