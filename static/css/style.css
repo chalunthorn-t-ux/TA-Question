@@ -623,6 +623,167 @@ body {
 .logout-btn svg { width: 100%; height: 100%; }
 
 /* ══════════════════════════════════════════════════════════════
+   หน้าจัดการสมาชิก (แอดมิน)
+   ══════════════════════════════════════════════════════════════ */
+.admin-body { background: var(--cream); min-height: 100vh; }
+
+.admin {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 30px 22px 44px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+.admin__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.admin__head h1 { font-size: 21px; font-weight: 700; letter-spacing: -.3px; }
+.admin__head p  { font-size: 12.5px; color: var(--ink-muted); }
+
+.btn--ghost-dark {
+  color: var(--navy);
+  border: 1px solid var(--line);
+  background: var(--white);
+  text-decoration: none;
+  width: auto;
+  white-space: nowrap;
+}
+.btn--ghost-dark:hover { background: var(--primary-faint); border-color: var(--primary); }
+
+.admin__flash {
+  padding: 13px 16px;
+  border-radius: var(--r-sm);
+  font-size: 13px; line-height: 1.6;
+  background: var(--primary-faint);
+  border-left: 3px solid var(--primary);
+}
+.admin__flash--ok    { background: rgba(46, 125, 91, .09);  border-left-color: var(--ok); }
+.admin__flash--error { background: rgba(179, 64, 47, .09);  border-left-color: var(--danger); }
+.admin__flash--warn  { background: rgba(184, 121, 31, .09); border-left-color: var(--warn); }
+.admin__flash code {
+  font-family: ui-monospace, monospace; font-size: .9em;
+  padding: 1px 5px; border-radius: 4px; background: rgba(9, 21, 64, .07);
+}
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-sm);
+}
+.card__title {
+  font-size: 15px; font-weight: 700;
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 9px;
+}
+
+.badge {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 9px; border-radius: 999px;
+  background: var(--primary-faint); color: var(--navy-500);
+}
+
+.admin__grid {
+  display: grid; gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+}
+
+.stack { display: flex; flex-direction: column; gap: 14px; }
+
+.field select {
+  font-family: inherit; font-size: 14px; color: var(--ink);
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--white);
+  outline: none; width: 100%;
+  transition: border-color .16s, box-shadow .16s;
+}
+.field select:focus { border-color: var(--primary); box-shadow: 0 0 0 3.5px var(--primary-faint); }
+.field input:disabled, .field select:disabled {
+  background: var(--cream-deep); color: var(--ink-faint); cursor: not-allowed;
+}
+
+/* ── ตาราง ── */
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th {
+  text-align: left;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .8px;
+  color: var(--ink-faint);
+  padding: 0 12px 9px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.table tr:last-child td { border-bottom: none; }
+.table__actions { text-align: right; white-space: nowrap; }
+.table .muted { color: var(--ink-faint); font-size: 12px; }
+
+.tag {
+  font-size: 10px; font-weight: 600;
+  padding: 1px 7px; margin-left: 6px;
+  border-radius: 999px;
+  background: var(--primary); color: var(--navy);
+}
+
+.role {
+  font-size: 11.5px; font-weight: 500;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--cream-deep); color: var(--ink-muted);
+  white-space: nowrap;
+}
+.role--admin { background: var(--navy); color: var(--primary); font-weight: 600; }
+
+.inline-form { display: inline; }
+
+.mini-btn {
+  font-family: inherit; font-size: 11.5px; font-weight: 500;
+  padding: 6px 11px; margin-left: 5px;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--white); color: var(--navy);
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.mini-btn:hover { background: var(--primary-faint); border-color: var(--primary); }
+.mini-btn--danger { color: var(--danger); }
+.mini-btn--danger:hover { background: rgba(179, 64, 47, .09); border-color: var(--danger); }
+
+.admin__foot { font-size: 11.5px; color: var(--ink-faint); text-align: center; margin-top: 4px; }
+
+/* ── ลิงก์ไปหน้าจัดการสมาชิก ใน sidebar ── */
+.side-link {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255, 247, 235, .78);
+  text-decoration: none;
+  border: 1px solid rgba(171, 210, 250, .18);
+  transition: background .15s, color .15s;
+}
+.side-link:hover { background: rgba(171, 210, 250, .12); color: var(--cream); }
+.side-link svg { width: 15px; height: 15px; flex: 0 0 15px; }
+
+/* ลิงก์เข้าสู่ระบบของผู้ดูแล — ไม่ต้องเด่น เพราะผู้ใช้ทั่วไปไม่ต้องใช้ */
+.side-link--quiet {
+  border-color: transparent;
+  color: rgba(255, 247, 235, .45);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.side-link--quiet:hover { color: rgba(255, 247, 235, .8); background: rgba(255, 247, 235, .06); }
+
+/* ══════════════════════════════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {

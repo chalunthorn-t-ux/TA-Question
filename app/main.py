@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -115,9 +116,57 @@ def require_admin(request: Request) -> auth.User:
     return user
 
 
-def _auth_page(request: Request, mode: str, error: str = "", username: str = ""):
+# --------------------------------------------------------------------------- #
+# จำกัดจำนวนคำถามต่อ IP
+#
+# หน้าถาม-ตอบเปิดให้ทุกคนที่มีลิงก์ ทุกคำถามใช้โควตา Gemini ของเจ้าของระบบ
+# ถ้าไม่จำกัด ลิงก์หลุดในกลุ่มแชทครั้งเดียวก็อาจโควตาหมดในไม่กี่นาที
+#
+# เก็บในหน่วยความจำ: บน serverless จะนับแยกตาม instance จึงกันได้ไม่สมบูรณ์
+# แต่ยังช่วยตัดการยิงรัว ๆ จากที่เดียวได้
+# --------------------------------------------------------------------------- #
+_ask_history: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    # Vercel และ proxy อื่นส่ง IP จริงมาใน x-forwarded-for (ตัวแรกสุด)
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit_check(ip: str) -> int:
+    """คืนจำนวนวินาทีที่ต้องรอ ถ้ายังไม่เกินโควตาคืน 0"""
+    if config.ASK_RATE_LIMIT <= 0:
+        return 0
+
+    now = time.monotonic()
+    window = config.ASK_RATE_WINDOW
+    recent = [t for t in _ask_history.get(ip, []) if now - t < window]
+
+    if len(recent) >= config.ASK_RATE_LIMIT:
+        _ask_history[ip] = recent
+        return int(window - (now - recent[0])) + 1
+
+    recent.append(now)
+    _ask_history[ip] = recent
+
+    # กันหน่วยความจำบวมถ้ามี IP เข้ามาเยอะ
+    if len(_ask_history) > 5000:
+        for key in [k for k, v in _ask_history.items() if not v or now - v[-1] > window]:
+            _ask_history.pop(key, None)
+    return 0
+
+
+def _auth_page(
+    request: Request,
+    mode: str,
+    error: str = "",
+    username: str = "",
+    notice: str = "",
+):
     """หน้า login/register — mode คือ 'login' หรือ 'register'"""
-    first_user = not auth.has_any_user()
     return templates.TemplateResponse(
         request=request,
         name="login.html",
@@ -127,8 +176,9 @@ def _auth_page(request: Request, mode: str, error: str = "", username: str = "")
             "mode": mode,
             "error": error,
             "username": username,
-            # ยังไม่มีใครในระบบ -> ชวนให้สมัครเป็น admin
-            "first_user": first_user,
+            # ยังไม่มีใครในระบบ -> ชวนให้สมัครเป็นผู้ดูแลคนแรก
+            "first_user": not auth.has_any_user(),
+            "notice": notice,
             "min_password": auth.MIN_PASSWORD,
         },
         status_code=200 if not error else 400,
@@ -139,12 +189,12 @@ def _auth_page(request: Request, mode: str, error: str = "", username: str = "")
 # หน้า login / register
 # --------------------------------------------------------------------------- #
 @app.get("/login")
-async def login_page(request: Request):
+async def login_page(request: Request, closed: int = 0):
     if current_user(request):
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
     if not auth.has_any_user():
         return RedirectResponse("/register", status_code=HTTP_303_SEE_OTHER)
-    return _auth_page(request, "login")
+    return _auth_page(request, "login", notice="closed" if closed else "")
 
 
 @app.post("/login")
@@ -167,8 +217,15 @@ async def login_submit(
 
 @app.get("/register")
 async def register_page(request: Request):
+    """สมัครเองได้เฉพาะตอนระบบยังไม่มีใครเลย (ตั้งบัญชีผู้ดูแลคนแรก)
+
+    หลังจากนั้นการสร้างบัญชีเป็นหน้าที่ของแอดมินที่ /admin/users
+    ถ้าปิดตายตั้งแต่แรกจะไม่มีทางสร้างแอดมินคนแรกได้เลยตอนติดตั้งใหม่
+    """
     if current_user(request):
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if auth.has_any_user():
+        return RedirectResponse("/login?closed=1", status_code=HTTP_303_SEE_OTHER)
     return _auth_page(request, "register")
 
 
@@ -179,6 +236,10 @@ async def register_submit(
     password: str = Form(...),
     confirm: str = Form(...),
 ):
+    # กันคนยิง POST ตรงมาสมัครเองหลังมีบัญชีแล้ว
+    if auth.has_any_user():
+        return RedirectResponse("/login?closed=1", status_code=HTTP_303_SEE_OTHER)
+
     try:
         user = await run_in_threadpool(auth.register, username, password, confirm)
     except auth.AuthError as exc:
@@ -187,6 +248,99 @@ async def register_submit(
     request.session.clear()
     request.session["user"] = {"username": user.username, "role": user.role}
     return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+
+# --------------------------------------------------------------------------- #
+# จัดการสมาชิก — แอดมินเท่านั้น
+# --------------------------------------------------------------------------- #
+def _flash(request: Request, message: str, kind: str = "ok") -> None:
+    request.session["flash"] = {"message": message, "kind": kind}
+
+
+def _take_flash(request: Request) -> dict | None:
+    return request.session.pop("flash", None)
+
+
+@app.get("/admin/users")
+async def users_page(request: Request, user: auth.User = Depends(require_admin)):
+    return templates.TemplateResponse(
+        request=request,
+        name="users.html",
+        context={
+            "title": config.APP_TITLE,
+            "user": user,
+            "users": auth.list_users(),
+            "flash": _take_flash(request),
+            "min_password": auth.MIN_PASSWORD,
+            "read_only": config.READ_ONLY_FS,
+            "users_file_error": auth.users_file_error,
+        },
+    )
+
+
+@app.post("/admin/users/create")
+async def users_create(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...),
+    role: str = Form(auth.ROLE_MEMBER),
+    user: auth.User = Depends(require_admin),
+):
+    try:
+        created = await run_in_threadpool(
+            auth.create_user, username, password, confirm, role
+        )
+        _flash(request, f"สร้างบัญชี “{created.username}” สิทธิ์"
+                        f"{'ผู้ดูแลระบบ' if created.is_admin else 'สมาชิก'}แล้ว")
+    except auth.AuthError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse("/admin/users", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/users/password")
+async def users_password(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    try:
+        await run_in_threadpool(auth.set_password, username, password, confirm)
+        _flash(request, f"เปลี่ยนรหัสผ่านของ “{username}” แล้ว")
+    except auth.AuthError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse("/admin/users", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/users/role")
+async def users_role(
+    request: Request,
+    username: str = Form(...),
+    role: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    try:
+        await run_in_threadpool(auth.set_role, username, role, actor=user.username)
+        _flash(request, f"เปลี่ยนสิทธิ์ “{username}” แล้ว")
+    except auth.AuthError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse("/admin/users", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/users/delete")
+async def users_delete(
+    request: Request,
+    username: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    try:
+        await run_in_threadpool(auth.delete_user, username, actor=user.username)
+        _flash(request, f"ลบบัญชี “{username}” แล้ว")
+    except auth.AuthError as exc:
+        _flash(request, str(exc), "error")
+    return RedirectResponse("/admin/users", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/logout")
@@ -200,10 +354,15 @@ async def logout(request: Request):
 # --------------------------------------------------------------------------- #
 @app.get("/")
 async def index(request: Request):
+    """หน้าถาม-ตอบ — เปิดให้ทุกคนที่มีลิงก์ใช้ได้ ไม่ต้องล็อกอิน
+
+    ล็อกอินมีไว้สำหรับผู้ดูแลระบบเพื่อจัดการเอกสารและบัญชีเท่านั้น
+    """
     user = current_user(request)
-    if user is None:
-        target = "/register" if not auth.has_any_user() else "/login"
-        return RedirectResponse(target, status_code=HTTP_303_SEE_OTHER)
+
+    # ยังไม่มีผู้ดูแลระบบเลย -> พาไปตั้งบัญชีแรกก่อน
+    if user is None and not auth.has_any_user():
+        return RedirectResponse("/register", status_code=HTTP_303_SEE_OTHER)
 
     store = pipeline.get_store()
     return templates.TemplateResponse(
@@ -218,7 +377,7 @@ async def index(request: Request):
             "sources": store.sources(),
             "built_at": store.built_at,
             "user": user,
-            "can_manage": user.is_admin,
+            "can_manage": bool(user and user.is_admin),
         },
     )
 
@@ -227,10 +386,12 @@ async def index(request: Request):
 # API
 # --------------------------------------------------------------------------- #
 @app.get("/api/status")
-async def status(user: auth.User = Depends(require_user)):
+async def status(request: Request):
+    """สถานะระบบสำหรับหน้าเว็บ — เปิดให้ทุกคนเพราะหน้าถาม-ตอบไม่ต้องล็อกอิน"""
+    user = current_user(request)
     store = pipeline.get_store()
     return {
-        "user": {"username": user.username, "role": user.role},
+        "user": ({"username": user.username, "role": user.role} if user else None),
         "has_api_key": config.has_api_key(),
         "chat_model": config.GEMINI_CHAT_MODEL,
         "embed_model": config.GEMINI_EMBED_MODEL,
@@ -239,18 +400,38 @@ async def status(user: auth.User = Depends(require_user)):
         "sources": store.sources(),
         "built_at": store.built_at,
         "top_k": config.TOP_K,
-        "can_manage": user.is_admin,
+        "can_manage": bool(user and user.is_admin),
     }
 
 
 @app.post("/api/ask")
-async def api_ask(payload: AskRequest, user: auth.User = Depends(require_user)):
+async def api_ask(request: Request, payload: AskRequest):
+    """ถามคำถาม — เปิดให้ทุกคนที่มีลิงก์ ไม่ต้องล็อกอิน
+
+    มีการจำกัดจำนวนคำถามต่อ IP เพราะทุกคำถามใช้โควตา Gemini
+    ถ้าไม่จำกัด ลิงก์หลุดครั้งเดียวโควตาหมดได้ในไม่กี่นาที
+    """
+    user = current_user(request)
+    who = user.username if user else f"ไม่ล็อกอิน/{_client_ip(request)}"
+
+    # ผู้ดูแลระบบไม่ถูกจำกัด
+    if user is None:
+        wait = _rate_limit_check(_client_ip(request))
+        if wait:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"ถามถี่เกินไปครับ รบกวนรออีกประมาณ {wait // 60 + 1} นาทีแล้วลองใหม่ "
+                    "หรือสอบถามเจ้าหน้าที่โดยตรงได้เลยนะครับ"
+                ),
+            )
+
     history = [t.model_dump() for t in payload.history]
     # งาน embed/generate เป็น blocking I/O -> โยนเข้า threadpool กัน event loop ค้าง
     result = await run_in_threadpool(
         pipeline.ask, payload.question, history, payload.top_k
     )
-    log.info("ถาม (%s): %s", user.username, payload.question[:80])
+    log.info("ถาม (%s): %s", who, payload.question[:80])
     return result
 
 

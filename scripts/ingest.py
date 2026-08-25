@@ -27,6 +27,10 @@ def main() -> int:
     print(f"📂 โฟลเดอร์ต้นทาง : {args.data_dir}")
     print(f"🔑 Gemini API key : {'พบ' if config.has_api_key() else 'ไม่พบ (จะใช้ embedding สำรอง)'}")
     print(f"✂️  chunk size     : {config.CHUNK_SIZE} (overlap {config.CHUNK_OVERLAP})")
+    if config.REDACT_NAMES:
+        print(f"🔒 ลบชื่อบุคคล    : เปิด (คงชื่อ: {config.REDACT_KEEP_NAMES})")
+    else:
+        print("🔒 ลบชื่อบุคคล    : ปิด")
     print("-" * 58)
 
     result = pipeline.ingest(args.data_dir)
@@ -40,6 +44,9 @@ def main() -> int:
     print(("✨ " if result["ok"] else "⚠️  ") + result["message"])
     if result["ok"]:
         print(f"   embedding backend : {result['backend']}")
+        redacted = result.get("redacted_names", 0)
+        if redacted:
+            print(f"   ลบชื่อบุคคล        : {redacted} จุด -> [ผู้เข้าอบรม]")
         print(f"   บันทึกที่          : {config.INDEX_DIR}")
     return 0 if result["ok"] else 1
 

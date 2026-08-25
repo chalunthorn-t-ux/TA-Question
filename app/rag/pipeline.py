@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import config
-from . import embedder, llm
+from . import embedder, llm, redact
 from .chunker import chunk_sections
 from .loaders import RawSection, iter_documents, load_file
 from .store import VectorStore
@@ -50,6 +50,9 @@ def ingest(data_dir: Path | None = None) -> dict:
             files_failed.append({"name": path.name, "error": str(exc)})
             log.warning("อ่าน %s ไม่ได้: %s", path.name, exc)
 
+    # ลบชื่อบุคคลก่อนตัด chunk — ทำที่นี่ทีเดียว ไฟล์ใหม่ที่เพิ่มมาภายหลังจะถูกปกป้องเอง
+    redacted = redact.redact_sections(sections)
+
     if not sections:
         return {
             "ok": False,
@@ -76,6 +79,7 @@ def ingest(data_dir: Path | None = None) -> dict:
         "chunks": len(chunks),
         "backend": backend,
         "built_at": _store.built_at,
+        "redacted_names": redacted,
     }
 
 

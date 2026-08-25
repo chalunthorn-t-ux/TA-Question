@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>จัดการสมาชิก · {{ title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
+</head>
+<body class="admin-body">
+
+<main class="admin">
+
+  <header class="admin__head">
+    <div>
+      <h1>จัดการสมาชิก</h1>
+      <p>บัญชีทั้งหมดสร้างโดยผู้ดูแลระบบ — ผู้ใช้สมัครเองไม่ได้</p>
+    </div>
+    <a href="/" class="btn btn--ghost btn--ghost-dark">← กลับหน้าถาม-ตอบ</a>
+  </header>
+
+  {% if flash %}
+  <div class="admin__flash admin__flash--{{ flash.kind }}">
+    {{ '✅' if flash.kind == 'ok' else '⚠️' }} {{ flash.message }}
+  </div>
+  {% endif %}
+
+  {% if users_file_error %}
+  <div class="admin__flash admin__flash--error">
+    ⚠️ ไฟล์ผู้ใช้มีปัญหา: {{ users_file_error }}
+  </div>
+  {% endif %}
+
+  {% if read_only %}
+  <div class="admin__flash admin__flash--warn">
+    ⚠️ เซิร์ฟเวอร์นี้เขียนไฟล์ไม่ได้ (serverless) จึงสร้างหรือแก้บัญชีจากหน้านี้ไม่ได้<br />
+    ให้สร้างบัญชีในเครื่องที่พัฒนา แล้ว commit <code>storage/users.json</code> ขึ้นไป
+  </div>
+  {% endif %}
+
+  <!-- ══════════ รายชื่อสมาชิก ══════════ -->
+  <section class="card">
+    <h2 class="card__title">สมาชิกในระบบ <span class="badge">{{ users|length }}</span></h2>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ชื่อผู้ใช้</th>
+            <th>สิทธิ์</th>
+            <th>สร้างเมื่อ</th>
+            <th>เข้าล่าสุด</th>
+            <th class="table__actions">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>
+              <strong>{{ u.username }}</strong>
+              {% if u.username == user.username %}<span class="tag">คุณ</span>{% endif %}
+            </td>
+            <td>
+              {% if u.role == 'admin' %}
+                <span class="role role--admin">ผู้ดูแลระบบ</span>
+              {% else %}
+                <span class="role">สมาชิก</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ u.created_at[:10] or '-' }}</td>
+            <td class="muted">{{ u.last_login[:16].replace('T', ' ') or 'ยังไม่เคย' }}</td>
+            <td class="table__actions">
+              {% if not read_only %}
+              <form method="post" action="/admin/users/role" class="inline-form">
+                <input type="hidden" name="username" value="{{ u.username }}" />
+                <input type="hidden" name="role"
+                       value="{{ 'member' if u.role == 'admin' else 'admin' }}" />
+                <button type="submit" class="mini-btn">
+                  {{ 'ลดเป็นสมาชิก' if u.role == 'admin' else 'ตั้งเป็นแอดมิน' }}
+                </button>
+              </form>
+
+              {% if u.username != user.username %}
+              <form method="post" action="/admin/users/delete" class="inline-form"
+                    onsubmit="return confirm('ยืนยันลบบัญชี {{ u.username }}?')">
+                <input type="hidden" name="username" value="{{ u.username }}" />
+                <button type="submit" class="mini-btn mini-btn--danger">ลบ</button>
+              </form>
+              {% endif %}
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="admin__grid">
+    <!-- ══════════ สร้างบัญชีใหม่ ══════════ -->
+    <section class="card">
+      <h2 class="card__title">สร้างบัญชีใหม่</h2>
+      <form method="post" action="/admin/users/create" class="stack" autocomplete="off">
+        <label class="field">
+          <span class="field__label">ชื่อผู้ใช้</span>
+          <input type="text" name="username" required minlength="3" maxlength="32"
+                 pattern="[a-zA-Z0-9._\-]+" placeholder="เช่น teena.s"
+                 {% if read_only %}disabled{% endif %} />
+          <span class="field__hint">ใช้ได้เฉพาะ a-z 0-9 จุด ขีดกลาง ขีดล่าง</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">รหัสผ่าน</span>
+          <input type="password" name="password" required
+                 minlength="{{ min_password }}" maxlength="128"
+                 placeholder="อย่างน้อย {{ min_password }} ตัวอักษร"
+                 autocomplete="new-password" {% if read_only %}disabled{% endif %} />
+          <span class="field__hint">ผสมตัวอักษรกับตัวเลข แล้วแจ้งรหัสนี้ให้เจ้าตัวไปเปลี่ยนเอง</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">ยืนยันรหัสผ่าน</span>
+          <input type="password" name="confirm" required
+                 minlength="{{ min_password }}" maxlength="128"
+                 autocomplete="new-password" {% if read_only %}disabled{% endif %} />
+        </label>
+
+        <label class="field">
+          <span class="field__label">สิทธิ์</span>
+          <select name="role" {% if read_only %}disabled{% endif %}>
+            <option value="member">สมาชิก — ถามคำถามได้เท่านั้น</option>
+            <option value="admin">ผู้ดูแลระบบ — จัดการเอกสารและบัญชีได้</option>
+          </select>
+        </label>
+
+        <button type="submit" class="btn btn--primary btn--block"
+                {% if read_only %}disabled{% endif %}>สร้างบัญชี</button>
+      </form>
+    </section>
+
+    <!-- ══════════ เปลี่ยนรหัสผ่าน ══════════ -->
+    <section class="card">
+      <h2 class="card__title">เปลี่ยนรหัสผ่าน</h2>
+      <form method="post" action="/admin/users/password" class="stack" autocomplete="off">
+        <label class="field">
+          <span class="field__label">บัญชี</span>
+          <select name="username" {% if read_only %}disabled{% endif %}>
+            {% for u in users %}
+            <option value="{{ u.username }}">{{ u.username }}</option>
+            {% endfor %}
+          </select>
+          <span class="field__hint">ใช้ตอนมีคนลืมรหัสผ่าน</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">รหัสผ่านใหม่</span>
+          <input type="password" name="password" required
+                 minlength="{{ min_password }}" maxlength="128"
+                 autocomplete="new-password" {% if read_only %}disabled{% endif %} />
+        </label>
+
+        <label class="field">
+          <span class="field__label">ยืนยันรหัสผ่านใหม่</span>
+          <input type="password" name="confirm" required
+                 minlength="{{ min_password }}" maxlength="128"
+                 autocomplete="new-password" {% if read_only %}disabled{% endif %} />
+        </label>
+
+        <button type="submit" class="btn btn--primary btn--block"
+                {% if read_only %}disabled{% endif %}>เปลี่ยนรหัสผ่าน</button>
+      </form>
+    </section>
+  </div>
+
+  <p class="admin__foot">
+    ระบบนี้มีข้อมูลภายในของสถาบัน สร้างบัญชีให้เฉพาะผู้ที่ต้องใช้งานจริงเท่านั้น
+  </p>
+</main>
+
+</body>
+</html>

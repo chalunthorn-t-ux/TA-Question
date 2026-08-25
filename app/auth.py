@@ -215,6 +215,89 @@ def register(raw_username: str, password: str, confirm: str) -> User:
     return User(username=username, role=role)
 
 
+def create_user(raw_username: str, password: str, confirm: str, role: str) -> User:
+    """แอดมินสร้างบัญชีให้คนอื่น — ระบุสิทธิ์ได้ตรง ๆ ไม่ใช้กฎ "คนแรกได้ admin\""""
+    if role not in (ROLE_ADMIN, ROLE_MEMBER):
+        raise AuthError("สิทธิ์ที่เลือกไม่ถูกต้อง")
+
+    username = normalize_username(raw_username)
+    _validate_username(username)
+
+    if password != confirm:
+        raise AuthError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
+    _validate_password(password)
+
+    users = load_users()
+    if users_file_error:
+        raise AuthError(f"ไฟล์ผู้ใช้มีปัญหา จึงยังสร้างบัญชีไม่ได้: {users_file_error}")
+    if username in users:
+        raise AuthError("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
+
+    users[username] = {
+        "password": hash_password(password),
+        "role": role,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "last_login": "",
+    }
+    _save_users(users)
+    log.info("แอดมินสร้างบัญชี: %s (สิทธิ์ %s)", username, role)
+    return User(username=username, role=role)
+
+
+def _admins(users: dict[str, dict]) -> list[str]:
+    return [n for n, r in users.items() if r.get("role") == ROLE_ADMIN]
+
+
+def delete_user(raw_username: str, *, actor: str) -> None:
+    username = normalize_username(raw_username)
+
+    if username == normalize_username(actor):
+        raise AuthError("ลบบัญชีตัวเองไม่ได้")
+
+    users = load_users()
+    if username not in users:
+        raise AuthError(f"ไม่พบบัญชี '{username}'")
+    if _admins(users) == [username]:
+        raise AuthError("ลบไม่ได้ เพราะเป็นผู้ดูแลระบบคนเดียวที่เหลือ")
+
+    del users[username]
+    _save_users(users)
+    log.info("ลบบัญชี: %s (โดย %s)", username, actor)
+
+
+def set_role(raw_username: str, role: str, *, actor: str) -> None:
+    if role not in (ROLE_ADMIN, ROLE_MEMBER):
+        raise AuthError("สิทธิ์ที่เลือกไม่ถูกต้อง")
+
+    username = normalize_username(raw_username)
+    users = load_users()
+    if username not in users:
+        raise AuthError(f"ไม่พบบัญชี '{username}'")
+
+    if role == ROLE_MEMBER and _admins(users) == [username]:
+        raise AuthError("ลดสิทธิ์ไม่ได้ เพราะจะไม่มีผู้ดูแลระบบเหลือในระบบ")
+
+    users[username]["role"] = role
+    _save_users(users)
+    log.info("เปลี่ยนสิทธิ์ %s เป็น %s (โดย %s)", username, role, actor)
+
+
+def set_password(raw_username: str, password: str, confirm: str) -> None:
+    username = normalize_username(raw_username)
+
+    if password != confirm:
+        raise AuthError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
+    _validate_password(password)
+
+    users = load_users()
+    if username not in users:
+        raise AuthError(f"ไม่พบบัญชี '{username}'")
+
+    users[username]["password"] = hash_password(password)
+    _save_users(users)
+    log.info("เปลี่ยนรหัสผ่านของ %s", username)
+
+
 def _is_locked(username: str) -> int:
     """คืนจำนวนวินาทีที่ต้องรอ ถ้ายังไม่ถูกล็อกคืน 0"""
     now = time.time()

@@ -26,8 +26,16 @@
     {% if first_user %}
     <div class="auth__notice auth__notice--first">
       <strong>🎉 ยังไม่มีใครในระบบ</strong>
-      <span>บัญชีแรกที่สมัครจะได้สิทธิ์ <b>ผู้ดูแลระบบ (Admin)</b> โดยอัตโนมัติ
-            ซึ่งเป็นคนเดียวที่อัปโหลดเอกสารและสร้าง Index ได้</span>
+      <span>บัญชีนี้จะเป็น <b>ผู้ดูแลระบบ (Admin)</b> คนแรก ซึ่งเป็นคนเดียวที่สร้างบัญชีให้คนอื่น
+            อัปโหลดเอกสาร และสร้าง Index ได้ — หลังจากนี้ระบบจะปิดการสมัครด้วยตัวเอง</span>
+    </div>
+    {% endif %}
+
+    {% if notice == 'closed' %}
+    <div class="auth__notice">
+      <strong>การสมัครสมาชิกด้วยตัวเองถูกปิดไว้</strong>
+      <span>บัญชีทั้งหมดสร้างโดยผู้ดูแลระบบ ถ้ายังไม่มีบัญชี รบกวนติดต่อผู้ดูแลระบบ
+            เพื่อขอชื่อผู้ใช้และรหัสผ่านนะครับ</span>
     </div>
     {% endif %}
 
@@ -65,11 +73,7 @@
                placeholder="พิมพ์รหัสผ่านเดิมอีกครั้ง" autocomplete="new-password" />
       </label>
 
-      <button type="submit" class="btn btn--primary btn--block">สมัครสมาชิก</button>
-
-      <p class="auth__switch">
-        มีบัญชีอยู่แล้ว? <a href="/login">เข้าสู่ระบบ</a>
-      </p>
+      <button type="submit" class="btn btn--primary btn--block">สร้างบัญชีผู้ดูแลระบบ</button>
     </form>
 
     {% else %}
@@ -91,7 +95,7 @@
       <button type="submit" class="btn btn--primary btn--block">เข้าสู่ระบบ</button>
 
       <p class="auth__switch">
-        ยังไม่มีบัญชี? <a href="/register">สมัครสมาชิก</a>
+        ยังไม่มีบัญชี? รบกวนติดต่อผู้ดูแลระบบเพื่อขอบัญชี
       </p>
     </form>
     {% endif %}

@@ -67,6 +67,18 @@ GEMINI_THINKING_BUDGET = _int("GEMINI_THINKING_BUDGET", 512)
 # ต้องน้อยกว่า maxDuration ใน vercel.json
 REQUEST_BUDGET_SECONDS = _int("REQUEST_BUDGET_SECONDS", 45)
 
+# ---- จำกัดจำนวนคำถามของผู้ใช้ที่ไม่ได้ล็อกอิน ----
+# หน้าถาม-ตอบเปิดให้ทุกคนที่มีลิงก์ ทุกคำถามใช้โควตา Gemini ของเจ้าของระบบ
+# ตั้ง 0 เพื่อปิดการจำกัด (ไม่แนะนำถ้าลิงก์กระจายออกไปแล้ว)
+ASK_RATE_LIMIT = _int("ASK_RATE_LIMIT", 30)          # จำนวนคำถามต่อ IP
+ASK_RATE_WINDOW = _int("ASK_RATE_WINDOW", 3600)      # ต่อช่วงเวลา (วินาที)
+
+# ---- ลบชื่อบุคคลก่อนเข้า index ----
+# เอกสารมีชื่อผู้เข้าอบรมจริงพร้อมผลประเมิน ซึ่งไม่ควรอยู่ในระบบที่เปิดสาธารณะ
+REDACT_NAMES = _str("REDACT_NAMES", "1") not in ("0", "false", "no")
+# ชื่อเจ้าหน้าที่ที่ต้องคงไว้ (คั่นด้วยจุลภาค) ไม่งั้นระบบจะตอบไม่ได้ว่าติดต่อใคร
+REDACT_KEEP_NAMES = _str("REDACT_KEEP_NAMES", "ทีน")
+
 # ---- RAG ----
 CHUNK_SIZE = _int("CHUNK_SIZE", 900)
 CHUNK_OVERLAP = _int("CHUNK_OVERLAP", 150)

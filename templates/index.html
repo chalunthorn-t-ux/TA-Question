@@ -86,8 +86,20 @@
     </div>
 
     <div class="side-block side-block--footer">
+      {% if can_manage %}
+      <a href="/admin/users" class="side-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke-linecap="round"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke-linecap="round"/>
+        </svg>
+        จัดการสมาชิก
+      </a>
+      {% endif %}
+
       <button class="btn btn--ghost" id="btn-clear">ล้างบทสนทนา</button>
 
+      {% if user %}
       <div class="user-chip">
         <div class="user-chip__avatar">{{ user.username[0] }}</div>
         <div class="user-chip__meta">
@@ -105,6 +117,15 @@
           </button>
         </form>
       </div>
+      {% else %}
+      <a href="/login" class="side-link side-link--quiet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M15 3h4a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        เข้าสู่ระบบสำหรับผู้ดูแล
+      </a>
+      {% endif %}
     </div>
   </aside>
 

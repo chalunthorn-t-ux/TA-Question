@@ -182,6 +182,19 @@
     return false;
   }
 
+  /** ถามถี่เกินโควตา — บอกให้รอ ไม่ใช่ error ที่ผู้ใช้ทำอะไรผิด */
+  async function handleRateLimit(res) {
+    if (res.status !== 429) return false;
+    let msg = "ถามถี่เกินไป รบกวนรอสักครู่แล้วลองใหม่นะครับ";
+    try {
+      const d = await res.json();
+      if (typeof d.detail === "string") msg = d.detail;
+    } catch { /* ใช้ข้อความเริ่มต้น */ }
+    addMessage("bot", renderMarkdown(msg));
+    toast("ถามถี่เกินไป", "warn", 5000);
+    return true;
+  }
+
   function setBusy(state) {
     busy = state;
     el.send.disabled = state;
@@ -207,6 +220,7 @@
       typing.remove();
 
       if (handleAuthError(res)) return;
+      if (await handleRateLimit(res)) return;
 
       if (!res.ok) {
         const detail = await res.text();
