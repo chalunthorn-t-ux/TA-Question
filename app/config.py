@@ -96,6 +96,11 @@ SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "").strip() in ("1", "true"
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip() in ("1", "true", "yes")
 
 # ---- UI ----
+# แสดงการ์ดแหล่งอ้างอิงพร้อมข้อความจากเอกสารใต้คำตอบหรือไม่
+# ปิดไว้เป็นค่าเริ่มต้น: หน้าเว็บเปิดให้คนทั่วไป ไม่ควรโชว์เนื้อหาดิบจากเอกสารภายใน
+# เปิดด้วย SHOW_SOURCES=1 เวลาต้องการตรวจว่าระบบดึงข้อมูลจากที่ไหน
+SHOW_SOURCES = _str("SHOW_SOURCES", "0") in ("1", "true", "yes")
+
 APP_TITLE = _str("APP_TITLE", "TA Assistant")
 APP_SUBTITLE = _str("APP_SUBTITLE", "ผู้ช่วยตอบคำถามสำหรับ TA (Training Assistant) ใหม่")
 

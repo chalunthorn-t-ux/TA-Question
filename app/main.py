@@ -374,10 +374,13 @@ async def index(request: Request):
             "has_api_key": config.has_api_key(),
             "chat_model": config.GEMINI_CHAT_MODEL,
             "chunk_count": len(store.chunks),
-            "sources": store.sources(),
+            # ชื่อไฟล์แสดงเฉพาะแอดมิน (template กรองอีกชั้นด้วย can_manage)
+            "sources": store.sources() if (user and user.is_admin) else [],
+            "document_count": len(store.sources()),
             "built_at": store.built_at,
             "user": user,
             "can_manage": bool(user and user.is_admin),
+            "show_sources": config.SHOW_SOURCES,
         },
     )
 
@@ -389,7 +392,9 @@ async def index(request: Request):
 async def status(request: Request):
     """สถานะระบบสำหรับหน้าเว็บ — เปิดให้ทุกคนเพราะหน้าถาม-ตอบไม่ต้องล็อกอิน"""
     user = current_user(request)
+    is_admin = bool(user and user.is_admin)
     store = pipeline.get_store()
+    sources = store.sources()
     return {
         "user": ({"username": user.username, "role": user.role} if user else None),
         "has_api_key": config.has_api_key(),
@@ -397,10 +402,13 @@ async def status(request: Request):
         "embed_model": config.GEMINI_EMBED_MODEL,
         "embed_backend": store.backend,
         "chunk_count": len(store.chunks),
-        "sources": store.sources(),
+        # ชื่อไฟล์เป็นชื่อเอกสารภายใน ส่งให้แอดมินเท่านั้น
+        # ส่วนจำนวนเอกสารส่งได้ ไม่ได้บอกอะไรที่อ่อนไหว
+        "sources": sources if is_admin else [],
+        "document_count": len(sources),
         "built_at": store.built_at,
         "top_k": config.TOP_K,
-        "can_manage": bool(user and user.is_admin),
+        "can_manage": is_admin,
     }
 
 

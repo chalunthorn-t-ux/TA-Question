@@ -124,19 +124,24 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
         status = "ok"
     except llm.LLMError as exc:
         # สรุปคำตอบไม่ได้ (โควตาหมด / Gemini ล่ม / ยังไม่มี key)
-        # ยังคืนข้อความที่ค้นเจอให้อ่านเองได้ ดีกว่าปล่อยให้มือเปล่า
         # แสดงเฉพาะข้อความภาษาคน — รายละเอียดทางเทคนิคไปอยู่ใน log
         log.warning("สร้างคำตอบไม่ได้: %s", exc.detail)
-        preview = "\n\n".join(
-            f"**[{s['ref']}] {s['source']}"
-            + (f" · {s['locator']}" if s["locator"] else "")
-            + f"**\n{s['excerpt']}"
-            for s in sources
-        )
-        answer = (
-            f"{exc.friendly}\n\n"
-            f"ระหว่างนี้ ข้อความจากเอกสารที่ตรงกับคำถามที่สุดคือ\n\n{preview}"
-        )
+        answer = exc.friendly
+        if config.SHOW_SOURCES:
+            # โหมดตรวจสอบ: คืนข้อความจากเอกสารให้อ่านเอง ดีกว่าปล่อยมือเปล่า
+            preview = "\n\n".join(
+                f"**[{s['ref']}] {s['source']}"
+                + (f" · {s['locator']}" if s["locator"] else "")
+                + f"**\n{s['excerpt']}"
+                for s in sources
+            )
+            answer += f"\n\nระหว่างนี้ ข้อความจากเอกสารที่ตรงกับคำถามที่สุดคือ\n\n{preview}"
         status = "retrieval_only"
 
-    return {"answer": answer, "sources": sources, "status": status}
+    # ไม่ส่ง sources ออกไปเลยเมื่อปิดการแสดง — กันเนื้อหาเอกสารรั่วผ่าน API
+    # แม้หน้าเว็บจะไม่แสดง คนที่เปิด DevTools ดูก็ยังเห็นได้ถ้าส่งไป
+    return {
+        "answer": answer,
+        "sources": sources if config.SHOW_SOURCES else [],
+        "status": status,
+    }

@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
 </head>
-<body>
+<body data-show-sources="{{ '1' if show_sources else '0' }}">
 
 <div class="app">
 
@@ -32,7 +32,7 @@
           <span class="stat__label">ชิ้นความรู้</span>
         </div>
         <div class="stat">
-          <span class="stat__value" id="stat-files">{{ sources|length }}</span>
+          <span class="stat__value" id="stat-files">{{ document_count }}</span>
           <span class="stat__label">เอกสาร</span>
         </div>
       </div>
@@ -48,10 +48,11 @@
       {% endif %}
     </nav>
 
+    {# ทั้งบล็อกนี้เป็นเครื่องมือของแอดมิน ผู้ใช้ทั่วไปไม่มีอะไรให้ทำ #}
+    {% if can_manage %}
     <div class="side-block">
       <h2 class="side-block__title">คลังข้อมูล</h2>
 
-      {% if can_manage %}
       <label class="dropzone" id="dropzone">
         <input type="file" id="file-input" multiple
                accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md" hidden />
@@ -67,7 +68,6 @@
         <span class="btn__label">สร้าง Index</span>
         <span class="spinner" hidden></span>
       </button>
-      {% endif %}
 
       <ul class="file-list" id="file-list">
         {% for s in sources %}
@@ -84,6 +84,7 @@
       <p class="side-note" id="built-at"></p>
       {% endif %}
     </div>
+    {% endif %}
 
     <div class="side-block side-block--footer">
       {% if can_manage %}
@@ -139,7 +140,11 @@
       </button>
       <div class="topbar__title">
         <h2>ถามได้ทุกเรื่องเกี่ยวกับงาน TA</h2>
+        {% if show_sources %}
         <p>คำตอบอ้างอิงจากเอกสารจริงในระบบ พร้อมบอกที่มาให้ตรวจสอบได้</p>
+        {% else %}
+        <p>คำตอบอ้างอิงจากเอกสารจริงของสถาบัน ไม่ใช่การเดาของ AI</p>
+        {% endif %}
       </div>
     </header>
 
@@ -182,7 +187,11 @@
           </svg>
         </button>
       </form>
+      {% if show_sources %}
       <p class="composer__hint">คำตอบสร้างจากเอกสารที่อัปโหลดไว้ — โปรดตรวจสอบแหล่งอ้างอิงก่อนนำไปใช้จริง</p>
+      {% else %}
+      <p class="composer__hint">คำตอบสร้างจากเอกสารภายในของสถาบัน — หากไม่มั่นใจ รบกวนสอบถามเจ้าหน้าที่เพื่อยืนยัน</p>
+      {% endif %}
     </footer>
   </main>
 </div>

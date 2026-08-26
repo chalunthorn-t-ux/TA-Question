@@ -26,6 +26,9 @@
     toastWrap: $("toast-wrap"),
   };
 
+  /** แสดงการ์ดแหล่งอ้างอิงใต้คำตอบหรือไม่ — เซิร์ฟเวอร์ส่งค่ามาทาง data attribute */
+  const SHOW_SOURCES = document.body.dataset.showSources === "1";
+
   /** ประวัติบทสนทนา ส่งไปให้ Gemini เพื่อให้ถามต่อเนื่องได้ */
   let history = [];
   let busy = false;
@@ -66,11 +69,19 @@
     return html;
   }
 
-  const inline = (s) =>
-    s
+  const inline = (s) => {
+    let out = s
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\[(\d{1,2})\]/g, '<span class="ref">$1</span>');
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    // ไม่แสดงแหล่งอ้างอิง -> เลข [1] [2] กดดูอะไรไม่ได้ ตัดออกให้อ่านสะอาด
+    // (prompt สั่งห้ามใส่แล้ว แต่โมเดลอาจเผลอ จึงกันอีกชั้นที่ฝั่งแสดงผล)
+    out = SHOW_SOURCES
+      ? out.replace(/\[(\d{1,2})\]/g, '<span class="ref">$1</span>')
+      : out.replace(/\s*\[\d{1,2}\]/g, "");
+
+    return out;
+  };
 
   function toast(message, kind = "ok", ms = 4200) {
     const node = document.createElement("div");
@@ -249,8 +260,14 @@
 
   function refreshStatus(data) {
     el.statChunks.textContent = data.chunk_count ?? 0;
-    el.statFiles.textContent = (data.sources || []).length;
-    el.builtAt.textContent = data.built_at ? `อัปเดตล่าสุด: ${data.built_at}` : "";
+    // จำนวนเอกสารส่งมาแยกจากรายชื่อไฟล์ เพราะรายชื่อมีให้แอดมินเท่านั้น
+    el.statFiles.textContent = data.document_count ?? 0;
+    if (el.builtAt) {
+      el.builtAt.textContent = data.built_at ? `อัปเดตล่าสุด: ${data.built_at}` : "";
+    }
+
+    // ผู้ใช้ทั่วไปไม่มีรายการไฟล์ในหน้า
+    if (!el.fileList) return;
 
     el.fileList.innerHTML = "";
     if (!data.sources || !data.sources.length) {
