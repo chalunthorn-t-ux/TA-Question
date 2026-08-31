@@ -11,6 +11,7 @@ import shutil
 import time
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import auth, config
+from . import auth, blobstore, config, db, gaps
 from .rag import pipeline
 
 logging.basicConfig(
@@ -34,9 +35,19 @@ log = logging.getLogger("ta-assistant")
 async def lifespan(app: FastAPI):
     if pipeline.load_index():
         store = pipeline.get_store()
-        log.info("โหลด index แล้ว: %d chunk (backend=%s)", len(store.chunks), store.backend)
+        log.info(
+            "โหลด index แล้ว: %d chunk (backend=%s, มาจาก=%s)",
+            len(store.chunks), store.backend, pipeline.index_source,
+        )
     else:
         log.info("ยังไม่มี index — วางไฟล์ใน data/ แล้วเรียก POST /api/ingest")
+
+    log.info("ที่เก็บบัญชีผู้ใช้: %s", auth.storage_backend())
+    if config.READ_ONLY_FS and not db.enabled():
+        log.critical(
+            "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง DATABASE_URL "
+            "-> สมัครสมาชิก/แก้บัญชีจะทำไม่ได้เลย ให้ผูก Postgres (เช่น Neon) ที่ผู้ให้บริการก่อน"
+        )
 
     if not config.has_api_key():
         log.warning("ยังไม่ได้ตั้ง GEMINI_API_KEY — ระบบจะทำงานในโหมดค้นหาเท่านั้น")
@@ -272,7 +283,8 @@ async def users_page(request: Request, user: auth.User = Depends(require_admin))
             "users": auth.list_users(),
             "flash": _take_flash(request),
             "min_password": auth.MIN_PASSWORD,
-            "read_only": config.READ_ONLY_FS,
+            # เขียนดิสก์ไม่ได้แต่มี Postgres ก็จัดการบัญชีได้ตามปกติ ไม่ต้องเตือน
+            "read_only": config.READ_ONLY_FS and not db.enabled(),
             "users_file_error": auth.users_file_error,
         },
     )
@@ -409,6 +421,9 @@ async def status(request: Request):
         "built_at": store.built_at,
         "top_k": config.TOP_K,
         "can_manage": is_admin,
+        # ที่มาของ index มีผลกับ "กด ingest แล้วทำไมไม่เปลี่ยน" — แอดมินต้องเห็น
+        "index_source": pipeline.index_source if is_admin else None,
+        "user_storage": auth.storage_backend() if is_admin else None,
     }
 
 
@@ -440,11 +455,27 @@ async def api_ask(request: Request, payload: AskRequest):
         pipeline.ask, payload.question, history, payload.top_k
     )
     log.info("ถาม (%s): %s", who, payload.question[:80])
+    # เก็บคำถามที่ตอบไม่ได้ไว้ดูว่าคลังความรู้ยังขาดเรื่องอะไร (เงียบถ้าไม่มีฐานข้อมูล)
+    await run_in_threadpool(
+        gaps.record, payload.question, result, user.username if user else None
+    )
     return result
 
 
 @app.post("/api/ingest")
 async def api_ingest(user: auth.User = Depends(require_admin)):
+    # บน serverless สร้าง index ที่นี่ไม่ได้: เขียนไฟล์ไม่ได้ และมีเพดานเวลา 60 วิ
+    # ถ้าปล่อยให้เริ่มแล้วไปตายกลางทาง จะได้ index ครึ่ง ๆ กลาง ๆ ซึ่งแย่กว่าไม่ทำเลย
+    if config.READ_ONLY_FS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "เวอร์ชันบนเซิร์ฟเวอร์สร้าง index ไม่ได้ครับ — ให้รันในเครื่องแทน: "
+                "python scripts/pull_docs.py แล้ว python scripts/ingest.py --push "
+                "เว็บจะเห็นความรู้ชุดใหม่ทันทีโดยไม่ต้อง deploy"
+            ),
+        )
+
     result = await run_in_threadpool(pipeline.ingest)
     if not result["ok"]:
         return JSONResponse(result, status_code=422)
@@ -456,7 +487,23 @@ async def api_upload(
     files: list[UploadFile] = File(...),
     user: auth.User = Depends(require_admin),
 ):
-    """อัปโหลดเอกสารเข้าโฟลเดอร์ data/ (ยังไม่สร้าง index — กด 'สร้าง Index' ต่อ)"""
+    """รับเอกสารเข้าคลัง (ยังไม่สร้าง index)
+
+    รันในเครื่อง -> เขียนลง data/ แล้วกด "สร้าง Index" ต่อได้เลย
+    รันบน Vercel -> ดิสก์เขียนไม่ได้ จึงพักไว้บน Blob ใต้ docs/
+                    ฝั่งเครื่องดึงลงมาด้วย scripts/pull_docs.py แล้ว ingest --push
+    """
+    to_blob = config.READ_ONLY_FS and blobstore.enabled()
+
+    if config.READ_ONLY_FS and not to_blob:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN "
+                "จึงยังรับไฟล์ไม่ได้ครับ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
+            ),
+        )
+
     saved: list[str] = []
     rejected: list[dict] = []
 
@@ -471,12 +518,21 @@ async def api_upload(
             rejected.append({"name": safe_name, "reason": f"ไม่รองรับนามสกุล {suffix or '(ไม่มี)'}"})
             continue
 
-        target = config.DATA_DIR / safe_name
         try:
-            with target.open("wb") as fh:
-                shutil.copyfileobj(upload.file, fh)
+            if to_blob:
+                data = await run_in_threadpool(upload.file.read)
+                await run_in_threadpool(
+                    blobstore.put,
+                    f"docs/{safe_name}",
+                    data,
+                    upload.content_type or "application/octet-stream",
+                )
+            else:
+                target = config.DATA_DIR / safe_name
+                with target.open("wb") as fh:
+                    shutil.copyfileobj(upload.file, fh)
             saved.append(safe_name)
-        except OSError as exc:
+        except (OSError, httpx.HTTPError) as exc:
             rejected.append({"name": safe_name, "reason": str(exc)})
         finally:
             await upload.close()
@@ -484,12 +540,29 @@ async def api_upload(
     if not saved and rejected:
         raise HTTPException(status_code=422, detail={"saved": saved, "rejected": rejected})
 
+    next_step = (
+        "รันในเครื่อง: python scripts/pull_docs.py แล้ว python scripts/ingest.py --push"
+        if to_blob
+        else "กด “สร้าง Index” เพื่อให้ระบบเรียนรู้"
+    )
     return {
         "ok": True,
         "saved": saved,
         "rejected": rejected,
-        "message": f"อัปโหลด {len(saved)} ไฟล์แล้ว — กด “สร้าง Index” เพื่อให้ระบบเรียนรู้",
+        "staged_to_blob": to_blob,
+        "message": f"อัปโหลด {len(saved)} ไฟล์แล้ว — {next_step}",
     }
+
+
+@app.get("/api/gaps")
+async def api_gaps(limit: int = 50, user: auth.User = Depends(require_admin)):
+    """คำถามที่ระบบตอบไม่ได้ — ใช้ตัดสินใจว่าควรเพิ่มเอกสารเรื่องอะไรต่อ"""
+    if not db.enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="ยังไม่ได้ตั้ง DATABASE_URL จึงยังไม่ได้เก็บคำถามที่ตอบไม่ได้",
+        )
+    return {"gaps": await run_in_threadpool(gaps.top, max(1, min(limit, 200)))}
 
 
 @app.get("/api/users")
@@ -526,11 +599,21 @@ async def healthz():
     elif not auth.has_any_user():
         problems.append(
             "ไม่มีบัญชีผู้ใช้ และเซิร์ฟเวอร์เขียนไฟล์ไม่ได้ -> สมัครสมาชิกไม่ได้"
-            if config.READ_ONLY_FS
+            if config.READ_ONLY_FS and not db.enabled()
             else "ไม่มีบัญชีผู้ใช้ -> คนแรกที่สมัครจะได้สิทธิ์ admin"
         )
     if config.READ_ONLY_FS and not config.SESSION_HTTPS_ONLY:
         problems.append("แนะนำให้ตั้ง SESSION_HTTPS_ONLY=1 เมื่อรันบน https")
+
+    # เขียนดิสก์ไม่ได้ + ไม่มีที่เก็บถาวร = ข้อมูลหายทุกครั้งที่ instance ตื่นใหม่
+    if config.READ_ONLY_FS and not db.enabled():
+        problems.append(
+            "ยังไม่ได้ตั้ง DATABASE_URL บนเซิร์ฟเวอร์ที่เขียนไฟล์ไม่ได้ -> สมัคร/แก้บัญชีไม่ได้"
+        )
+    if config.READ_ONLY_FS and not blobstore.enabled():
+        problems.append(
+            "ยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN -> อัปเดตความรู้ได้เฉพาะตอน deploy ใหม่เท่านั้น"
+        )
 
     return {
         "status": "ok" if not problems else "misconfigured",
@@ -541,7 +624,10 @@ async def healthz():
             "read_only_filesystem": config.READ_ONLY_FS,
             "index_chunks": len(store.chunks),
             "index_documents": len(store.sources()),
+            "index_source": pipeline.index_source,
             "embed_backend": store.backend,
+            "user_storage": auth.storage_backend(),
+            "blob_storage": blobstore.enabled(),
             "user_accounts": user_count,
             "users_file_ok": not auth.users_file_error,
             "chat_model": config.GEMINI_CHAT_MODEL,

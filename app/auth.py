@@ -1,6 +1,9 @@
 """ระบบสมาชิก: สมัคร เข้าสู่ระบบ และแบ่งสิทธิ์
 
-เก็บผู้ใช้ในไฟล์ JSON ที่ storage/users.json
+ข้อมูลบัญชีอยู่ที่ไหนขึ้นกับ [app/users_repo.py](users_repo.py):
+ตั้ง DATABASE_URL = เก็บลง Postgres, ไม่ตั้ง = เก็บลงไฟล์ storage/users.json เหมือนเดิม
+โมดูลนี้ดูแลเฉพาะกฎ — รหัสผ่าน การตรวจข้อมูล และสิทธิ์
+
 รหัสผ่านเก็บเป็น PBKDF2-HMAC-SHA256 พร้อม salt เฉพาะรายคน ไม่เก็บรหัสจริง
 
 คนแรกที่สมัครจะได้สิทธิ์ admin อัตโนมัติ คนถัดไปเป็น member
@@ -10,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import os
 import re
@@ -20,11 +22,9 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from . import config
+from . import config, users_repo
 
 log = logging.getLogger(__name__)
-
-_USERS_FILE = "users.json"
 
 # PBKDF2 รอบสูงเพื่อให้เดารหัสแบบ brute force แพง
 _ITERATIONS = 210_000
@@ -61,68 +61,44 @@ class User:
 
 
 # --------------------------------------------------------------------------- #
-# เก็บ/อ่านไฟล์ผู้ใช้
+# เก็บ/อ่านบัญชี — ทุกอย่างวิ่งผ่าน users_repo
 # --------------------------------------------------------------------------- #
-def _users_path():
-    return config.INDEX_DIR / _USERS_FILE
+def __getattr__(name: str):
+    """`auth.users_file_error` ยังใช้ได้เหมือนเดิม แต่ค่ามาจาก repo
+
+    เก็บชื่อเดิมไว้เพราะ /healthz หน้า /admin/users และ scripts/users.py อ่านตัวนี้อยู่
+    """
+    if name == "users_file_error":
+        return users_repo.last_error()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# ไฟล์ผู้ใช้เสียหาย — เก็บสาเหตุไว้เพื่อแสดงใน /healthz
-# ถ้าปล่อยให้คืนค่าว่างเงียบ ๆ อาการจะเหมือน "ยังไม่มีใครสมัคร" ซึ่งหลอกให้ไล่ผิดทาง
-users_file_error: str = ""
+def storage_backend() -> str:
+    """'postgres' หรือ 'json' — ใช้บอกใน /healthz ว่าข้อมูลบัญชีอยู่ที่ไหน"""
+    return users_repo.backend()
 
 
 def load_users() -> dict[str, dict]:
-    global users_file_error
-
-    path = _users_path()
-    if not path.exists():
-        users_file_error = ""
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        users_file_error = f"users.json ไม่ใช่ JSON ที่ถูกต้อง (บรรทัด {exc.lineno} คอลัมน์ {exc.colno}): {exc.msg}"
-        log.critical(
-            "ไฟล์ผู้ใช้เสียหาย -> ทุกคนล็อกอินไม่ได้! %s "
-            "มักเกิดจากการแก้ไฟล์ด้วยมือแล้ววงเล็บไม่ครบ "
-            "ใช้ scripts/users.py จัดการบัญชีแทนการแก้ไฟล์เอง",
-            users_file_error,
-        )
-        return {}
-    except OSError as exc:
-        users_file_error = f"อ่านไฟล์ users.json ไม่ได้: {exc}"
-        log.critical("อ่านไฟล์ผู้ใช้ไม่ได้ -> ทุกคนล็อกอินไม่ได้! %s", exc)
-        return {}
-
-    if not isinstance(data, dict) or not isinstance(data.get("users"), dict):
-        users_file_error = "users.json มีโครงสร้างไม่ถูกต้อง (ต้องมีคีย์ 'users' เป็นอ็อบเจกต์)"
-        log.critical("โครงสร้างไฟล์ผู้ใช้ผิด -> ทุกคนล็อกอินไม่ได้! %s", users_file_error)
-        return {}
-
-    users_file_error = ""
-    return data["users"]
+    return users_repo.load_all()
 
 
 def _save_users(users: dict[str, dict]) -> None:
-    path = _users_path()
-    payload = {"version": 1, "users": users}
+    """เขียนทับทั้งชุด — เหลือไว้ให้สคริปต์เก่าเรียก เส้นทางปกติใช้ upsert ทีละคน"""
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # เขียนไฟล์ชั่วคราวแล้วเปลี่ยนชื่อ กันไฟล์เสียหายถ้าดับกลางทาง
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError as exc:
-        # Vercel และ serverless อื่น ๆ เขียนไฟล์ไม่ได้
-        raise AuthError(
-            "ระบบนี้เปิดให้สมัครสมาชิกไม่ได้ (เซิร์ฟเวอร์เขียนไฟล์ไม่ได้) "
-            "รบกวนติดต่อผู้ดูแลระบบเพื่อสร้างบัญชีให้นะครับ"
-        ) from exc
+        users_repo.save_all(users)
+    except users_repo.RepoError as exc:
+        raise AuthError(str(exc)) from exc
+
+
+def _upsert(username: str, record: dict) -> None:
+    try:
+        users_repo.upsert(username, record)
+    except users_repo.RepoError as exc:
+        raise AuthError(str(exc)) from exc
 
 
 def user_count() -> int:
-    return len(load_users())
+    return users_repo.count()
 
 
 def has_any_user() -> bool:
@@ -137,7 +113,7 @@ def list_users() -> list[dict]:
             "created_at": rec.get("created_at", ""),
             "last_login": rec.get("last_login", ""),
         }
-        for name, rec in sorted(load_users().items())
+        for name, rec in sorted(users_repo.load_all().items())
     ]
 
 
@@ -186,6 +162,15 @@ def _validate_password(password: str) -> None:
         raise AuthError("รหัสผ่านควรผสมทั้งตัวอักษรและตัวเลข เพื่อให้เดายากขึ้น")
 
 
+def _new_record(password: str, role: str) -> dict:
+    return {
+        "password": hash_password(password),
+        "role": role,
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "last_login": "",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # สมัคร / เข้าสู่ระบบ
 # --------------------------------------------------------------------------- #
@@ -197,20 +182,13 @@ def register(raw_username: str, password: str, confirm: str) -> User:
         raise AuthError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
     _validate_password(password)
 
-    users = load_users()
-    if username in users:
+    if users_repo.get(username) is not None:
         raise AuthError("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
 
     # คนแรกที่สมัคร = admin
-    role = ROLE_ADMIN if not users else ROLE_MEMBER
+    role = ROLE_ADMIN if users_repo.count() == 0 else ROLE_MEMBER
 
-    users[username] = {
-        "password": hash_password(password),
-        "role": role,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "last_login": "",
-    }
-    _save_users(users)
+    _upsert(username, _new_record(password, role))
     log.info("สมัครสมาชิกใหม่: %s (สิทธิ์ %s)", username, role)
     return User(username=username, role=role)
 
@@ -227,25 +205,15 @@ def create_user(raw_username: str, password: str, confirm: str, role: str) -> Us
         raise AuthError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
     _validate_password(password)
 
-    users = load_users()
-    if users_file_error:
-        raise AuthError(f"ไฟล์ผู้ใช้มีปัญหา จึงยังสร้างบัญชีไม่ได้: {users_file_error}")
-    if username in users:
+    existing = users_repo.get(username)
+    if users_repo.last_error():
+        raise AuthError(f"ชั้นเก็บข้อมูลมีปัญหา จึงยังสร้างบัญชีไม่ได้: {users_repo.last_error()}")
+    if existing is not None:
         raise AuthError("ชื่อผู้ใช้นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
 
-    users[username] = {
-        "password": hash_password(password),
-        "role": role,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "last_login": "",
-    }
-    _save_users(users)
+    _upsert(username, _new_record(password, role))
     log.info("แอดมินสร้างบัญชี: %s (สิทธิ์ %s)", username, role)
     return User(username=username, role=role)
-
-
-def _admins(users: dict[str, dict]) -> list[str]:
-    return [n for n, r in users.items() if r.get("role") == ROLE_ADMIN]
 
 
 def delete_user(raw_username: str, *, actor: str) -> None:
@@ -254,14 +222,15 @@ def delete_user(raw_username: str, *, actor: str) -> None:
     if username == normalize_username(actor):
         raise AuthError("ลบบัญชีตัวเองไม่ได้")
 
-    users = load_users()
-    if username not in users:
+    if users_repo.get(username) is None:
         raise AuthError(f"ไม่พบบัญชี '{username}'")
-    if _admins(users) == [username]:
+    if users_repo.admins() == [username]:
         raise AuthError("ลบไม่ได้ เพราะเป็นผู้ดูแลระบบคนเดียวที่เหลือ")
 
-    del users[username]
-    _save_users(users)
+    try:
+        users_repo.delete(username)
+    except users_repo.RepoError as exc:
+        raise AuthError(str(exc)) from exc
     log.info("ลบบัญชี: %s (โดย %s)", username, actor)
 
 
@@ -270,15 +239,15 @@ def set_role(raw_username: str, role: str, *, actor: str) -> None:
         raise AuthError("สิทธิ์ที่เลือกไม่ถูกต้อง")
 
     username = normalize_username(raw_username)
-    users = load_users()
-    if username not in users:
+    record = users_repo.get(username)
+    if record is None:
         raise AuthError(f"ไม่พบบัญชี '{username}'")
 
-    if role == ROLE_MEMBER and _admins(users) == [username]:
+    if role == ROLE_MEMBER and users_repo.admins() == [username]:
         raise AuthError("ลดสิทธิ์ไม่ได้ เพราะจะไม่มีผู้ดูแลระบบเหลือในระบบ")
 
-    users[username]["role"] = role
-    _save_users(users)
+    record["role"] = role
+    _upsert(username, record)
     log.info("เปลี่ยนสิทธิ์ %s เป็น %s (โดย %s)", username, role, actor)
 
 
@@ -289,12 +258,12 @@ def set_password(raw_username: str, password: str, confirm: str) -> None:
         raise AuthError("รหัสผ่านทั้งสองช่องไม่ตรงกัน")
     _validate_password(password)
 
-    users = load_users()
-    if username not in users:
+    record = users_repo.get(username)
+    if record is None:
         raise AuthError(f"ไม่พบบัญชี '{username}'")
 
-    users[username]["password"] = hash_password(password)
-    _save_users(users)
+    record["password"] = hash_password(password)
+    _upsert(username, record)
     log.info("เปลี่ยนรหัสผ่านของ %s", username)
 
 
@@ -321,8 +290,7 @@ def authenticate(raw_username: str, password: str) -> User:
             f"กรอกรหัสผิดหลายครั้งเกินไป รบกวนรออีก {wait // 60 + 1} นาทีแล้วลองใหม่นะครับ"
         )
 
-    users = load_users()
-    record = users.get(username)
+    record = users_repo.get(username)
 
     # ไม่บอกว่าผิดที่ชื่อหรือรหัส เพื่อไม่ให้เดาได้ว่าชื่อไหนมีในระบบ
     # และคำนวณ hash หลอกเมื่อไม่มีผู้ใช้ ให้เวลาตอบสนองใกล้เคียงกัน
@@ -337,11 +305,13 @@ def authenticate(raw_username: str, password: str) -> User:
 
     _failures.pop(username, None)
 
-    record["last_login"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
-        _save_users(users)
-    except AuthError:
-        pass      # อัปเดตเวลาล็อกอินไม่ได้ ไม่ควรกันคนเข้าระบบ
+        users_repo.touch_login(
+            username, datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
+    except Exception as exc:      # noqa: BLE001
+        # อัปเดตเวลาล็อกอินไม่ได้ ไม่ควรกันคนเข้าระบบ
+        log.warning("อัปเดตเวลาเข้าระบบล่าสุดของ %s ไม่ได้: %s", username, exc)
 
     return User(username=username, role=record.get("role", ROLE_MEMBER))
 

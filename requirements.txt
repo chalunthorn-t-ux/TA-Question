@@ -14,5 +14,8 @@ python-docx>=1.1        # Word (.docx)
 openpyxl>=3.1           # Excel (.xlsx / .xlsm)
 xlrd>=2.0               # Excel รุ่นเก่า (.xls) — ไม่บังคับ
 
+# ---- ที่เก็บข้อมูลถาวร (production) ----
+psycopg[binary]>=3.2    # PostgreSQL (Neon) — เก็บบัญชีผู้ใช้แทนไฟล์ JSON
+
 # ---- Vector math ----
 numpy>=2.1
