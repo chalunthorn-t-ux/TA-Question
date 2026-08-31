@@ -26,20 +26,14 @@ __pycache__/
 data/
 source-pdf/
 
-# index และบัญชีผู้ใช้
-# Vercel เขียนไฟล์ไม่ได้ จึงต้อง commit ไฟล์เหล่านี้ขึ้นไปด้วย ไม่งั้นเว็บจะไม่มี
-# ทั้งความรู้และบัญชีให้ล็อกอิน
+# index, บัญชีผู้ใช้ และ cache — ห้ามขึ้น repo ทั้งหมด
+#
+# เดิมเคย commit ขึ้นไปเพราะ Vercel เขียนไฟล์ไม่ได้ แต่ตอนนี้ของจริงอยู่ที่
+# Postgres (บัญชี) และ Vercel Blob (index) แล้ว จึงไม่ต้องฝากไว้ใน git อีก
 #
 # ⚠️ index.json มีเนื้อหาเอกสารทั้งหมด (รวมชื่อผู้เข้าอบรม)
-#    users.json มี hash รหัสผ่าน (PBKDF2 210,000 รอบ ถอดกลับไม่ได้)
-#    repo นี้ต้องเป็น private เท่านั้น
-storage/*
-!storage/index.json
-!storage/vectors.npy
-!storage/users.json
-
-# cache ของ Gemini Vision — สร้างใหม่ได้ ไม่จำเป็นตอนตอบคำถาม
-storage/vision_cache.json
+#    users.json มี hash รหัสผ่าน
+storage/
 
 preview.html
 
