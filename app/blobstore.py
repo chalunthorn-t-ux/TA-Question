@@ -6,8 +6,9 @@ Blob จึงเป็นที่เดียวที่ index ใหม่�
 ตั้ง BLOB_READ_WRITE_TOKEN เมื่อไหร่ระบบจะใช้ Blob ไม่ตั้งก็อ่าน/เขียนดิสก์เหมือนเดิม
 เรียก REST API ตรง ๆ ด้วย httpx (มีอยู่แล้วใน requirements) ไม่ต้องพึ่ง SDK ฝั่ง JS
 
-⚠️ blob ที่อัปแบบ public ใครรู้ URL ก็เปิดอ่านได้ และ index.json มีเนื้อหาเอกสารจริง
-   ให้ตั้ง INDEX_BLOB_PREFIX เป็นค่าสุ่มยาว ๆ (เช่น "idx-9f3a1c7b8e/") แล้วเก็บเป็นความลับ
+⚠️ โหมดของ store (private/public) เลือกตอนสร้าง แก้ทีหลังไม่ได้ และต้องส่งให้ตรงกัน
+   ตอนอัปโหลด ค่าเริ่มต้นที่นี่คือ private เพราะ index มีเนื้อหาเอกสารจริงขององค์กร
+   ถ้า store เป็น public ให้ตั้ง BLOB_ACCESS=public
 """
 
 from __future__ import annotations
@@ -20,8 +21,11 @@ import httpx
 log = logging.getLogger(__name__)
 
 _API = "https://blob.vercel-storage.com"
-_API_VERSION = "7"
+_API_VERSION = "10"
 _TIMEOUT = 30.0
+
+# index เปลี่ยนบ่อย ไม่ควรให้ CDN ยึดของเก่าไว้นาน
+_CACHE_MAX_AGE = "60"
 
 
 def token() -> str:
@@ -29,16 +33,21 @@ def token() -> str:
 
 
 def prefix() -> str:
-    """โฟลเดอร์นำหน้าใน Blob — ใส่ค่าสุ่มไว้กันคนเดา URL เจอ"""
+    """โฟลเดอร์นำหน้าใน Blob — ต้องตั้งให้ตรงกันทั้งฝั่ง push และฝั่งเว็บ"""
     raw = (os.getenv("INDEX_BLOB_PREFIX") or "").strip().strip("/")
     return f"{raw}/" if raw else ""
+
+
+def access_mode() -> str:
+    mode = (os.getenv("BLOB_ACCESS") or "").strip().lower()
+    return mode if mode in ("public", "private") else "private"
 
 
 def enabled() -> bool:
     return bool(token())
 
 
-def _headers(extra: dict | None = None) -> dict:
+def _auth_headers(extra: dict | None = None) -> dict:
     headers = {
         "authorization": f"Bearer {token()}",
         "x-api-version": _API_VERSION,
@@ -48,55 +57,32 @@ def _headers(extra: dict | None = None) -> dict:
     return headers
 
 
-def _public_base() -> str:
-    """เดา host สาธารณะจาก token (รูปแบบ vercel_blob_rw_<storeId>_<secret>)
-
-    ใช้ให้ดาวน์โหลดได้โดยไม่ต้องยิง list API ก่อน = ประหยัด 1 round trip ตอน cold start
-    ถ้าเดาไม่ได้จะถอยไปใช้ list API แทน
-    """
-    parts = token().split("_")
-    if len(parts) >= 4 and parts[3]:
-        return f"https://{parts[3].lower()}.public.blob.vercel-storage.com"
-    return ""
-
-
 # --------------------------------------------------------------------------- #
 def put(key: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-    """อัปไฟล์ทับที่ path เดิม คืน URL สาธารณะ"""
+    """อัปไฟล์ทับที่ path เดิม คืน URL ของ blob"""
     pathname = f"{prefix()}{key}"
     resp = httpx.put(
-        f"{_API}/{pathname}",
+        _API,
+        params={"pathname": pathname},
         content=data,
-        headers=_headers(
+        headers=_auth_headers(
             {
+                "access": access_mode(),
                 "x-content-type": content_type,
-                # ปิด suffix สุ่ม ไม่งั้นอัปทีได้ path ใหม่ทุกครั้ง หาไฟล์เดิมไม่เจอ
-                "x-add-random-suffix": "0",
-                "x-access": "public",
-                # index เปลี่ยนบ่อย ไม่ควรให้ CDN ยึดของเก่าไว้นาน
-                "x-cache-control-max-age": "60",
+                "x-cache-control-max-age": _CACHE_MAX_AGE,
+                # ค่าเริ่มต้นของ Vercel คือห้ามเขียนทับ ถ้าไม่ส่งอันนี้
+                # push รอบที่สองจะ error ทั้งที่เราตั้งใจให้ทับของเดิม
+                "x-allow-overwrite": "1",
             }
         ),
         timeout=_TIMEOUT,
     )
     resp.raise_for_status()
-    return resp.json().get("url", "")
 
-
-def _resolve_url(key: str) -> str:
-    """หา URL ของไฟล์ผ่าน list API — ใช้เมื่อเดา host จาก token ไม่ได้ หรือเดาแล้วไม่เจอ"""
-    pathname = f"{prefix()}{key}"
-    resp = httpx.get(
-        _API,
-        params={"prefix": pathname, "limit": "1"},
-        headers=_headers(),
-        timeout=_TIMEOUT,
-    )
-    resp.raise_for_status()
-    for blob in resp.json().get("blobs", []):
-        if blob.get("pathname") == pathname:
-            return blob.get("downloadUrl") or blob.get("url", "")
-    return ""
+    payload = resp.json()
+    # อัปแล้วรู้ URL เลย ไม่ต้อง list ใหม่ — เก็บ downloadUrl เพราะเป็นตัวที่ใช้ตอนอ่าน
+    _url_cache[pathname] = payload.get("downloadUrl") or payload.get("url", "")
+    return payload.get("url", "")
 
 
 def list_keys(subprefix: str = "") -> list[dict]:
@@ -109,7 +95,7 @@ def list_keys(subprefix: str = "") -> list[dict]:
         params = {"prefix": base, "limit": "1000"}
         if cursor:
             params["cursor"] = cursor
-        resp = httpx.get(_API, params=params, headers=_headers(), timeout=_TIMEOUT)
+        resp = httpx.get(_API, params=params, headers=_auth_headers(), timeout=_TIMEOUT)
         resp.raise_for_status()
         payload = resp.json()
 
@@ -118,6 +104,7 @@ def list_keys(subprefix: str = "") -> list[dict]:
             found.append(
                 {
                     "key": pathname[len(prefix()):],
+                    "pathname": pathname,
                     "size": blob.get("size", 0),
                     "url": blob.get("downloadUrl") or blob.get("url", ""),
                 }
@@ -128,23 +115,43 @@ def list_keys(subprefix: str = "") -> list[dict]:
             return found
 
 
-def get(key: str) -> bytes | None:
-    """ดาวน์โหลดไฟล์ คืน None ถ้าไม่มี (ไม่ใช่ error — index อาจยังไม่เคย push)"""
+# จำผลการ list ไว้ในหน่วยความจำ — cold start หนึ่งครั้งต้องหา URL หลายไฟล์
+# ถ้าไม่จำ จะยิง list API ซ้ำทุกไฟล์ ซึ่งนับเป็น advanced operation ทุกครั้ง
+_url_cache: dict[str, str] = {}
+
+
+def _url_for(key: str, *, refresh: bool = False) -> str:
     pathname = f"{prefix()}{key}"
 
-    base = _public_base()
-    if base:
-        resp = httpx.get(f"{base}/{pathname}", timeout=_TIMEOUT)
-        if resp.status_code == 200:
-            return resp.content
-        if resp.status_code != 404:
-            resp.raise_for_status()
+    if refresh or not _url_cache:
+        _url_cache.clear()
+        for blob in list_keys():
+            _url_cache[blob["pathname"]] = blob["url"]
 
-    url = _resolve_url(key)
+    url = _url_cache.get(pathname, "")
+    if url or refresh:
+        return url
+
+    # ไม่เจอในของที่จำไว้ อาจเป็นไฟล์ที่เพิ่งอัปหลังจากนั้น — ถามใหม่อีกรอบ
+    return _url_for(key, refresh=True)
+
+
+def get(key: str) -> bytes | None:
+    """ดาวน์โหลดไฟล์ คืน None ถ้าไม่มี (ไม่ใช่ error — index อาจยังไม่เคย push)
+
+    store แบบ private อ่านได้เฉพาะคนที่ถือ token จึงต้องแนบ authorization ไปด้วย
+    ส่วน store แบบ public จะไม่สนใจ header นี้ ใช้เส้นทางเดียวกันได้ทั้งคู่
+    """
+    url = _url_for(key)
     if not url:
         return None
 
-    resp = httpx.get(url, timeout=_TIMEOUT)
+    resp = httpx.get(
+        url,
+        headers={"authorization": f"Bearer {token()}"},
+        timeout=_TIMEOUT,
+        follow_redirects=True,
+    )
     if resp.status_code == 404:
         return None
     resp.raise_for_status()
@@ -152,13 +159,16 @@ def get(key: str) -> bytes | None:
 
 
 def exists(key: str) -> bool:
-    return get(key) is not None
+    return bool(_url_for(key))
 
 
 def delete(key: str) -> None:
+    url = _url_for(key)
+    if not url:
+        return
     httpx.post(
         f"{_API}/delete",
-        json={"urls": [f"{_public_base()}/{prefix()}{key}"]},
-        headers=_headers({"content-type": "application/json"}),
+        json={"urls": [url]},
+        headers=_auth_headers({"content-type": "application/json"}),
         timeout=_TIMEOUT,
     ).raise_for_status()
