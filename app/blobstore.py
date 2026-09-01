@@ -21,7 +21,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 _API = "https://blob.vercel-storage.com"
-_API_VERSION = "10"
+_API_VERSION = "12"
 _TIMEOUT = 30.0
 
 # index เปลี่ยนบ่อย ไม่ควรให้ CDN ยึดของเก่าไว้นาน
