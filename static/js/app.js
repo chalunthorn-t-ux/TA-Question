@@ -314,7 +314,7 @@
         }
         await loadStatus();
       } else {
-        toast(data.message || "สร้าง index ไม่สำเร็จ", "error", 7000);
+        toast(data.message || data.detail || "สร้าง index ไม่สำเร็จ", "error", 7000);
       }
     } catch (err) {
       toast(`สร้าง index ไม่สำเร็จ: ${err.message}`, "error");

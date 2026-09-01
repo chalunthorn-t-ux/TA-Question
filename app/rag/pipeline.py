@@ -82,7 +82,7 @@ def load_index() -> bool:
 
 
 def push_index(directory: Path | None = None) -> list[dict]:
-    """อัป index จากดิสก์ขึ้น Blob — ใช้หลัง ingest ในเครื่องเสร็จ"""
+    """อัป index จากดิสก์ขึ้น Blob — ใช้หลัง ingest ในเครื่องเสร็จ (หรือหลัง ingest บน Vercel เอง)"""
     if not blobstore.enabled():
         raise RuntimeError(
             "ยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN — สร้าง Blob store ที่ Vercel "
@@ -104,10 +104,62 @@ def push_index(directory: Path | None = None) -> list[dict]:
     return uploaded
 
 
+_DOCS_PREFIX = "docs/"
+
+
+def _fetch_docs_from_blob(target: Path) -> list[str]:
+    """ดึงเอกสารต้นฉบับที่แอดมินอัปโหลดผ่านหน้าเว็บ (พักไว้บน Blob ใต้ docs/) ลง /tmp
+
+    ใช้ตอน ingest บน Vercel เอง — คนละที่จาก scripts/pull_docs.py แต่ตรรกะเดียวกัน
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    items = [b for b in blobstore.list_keys(_DOCS_PREFIX) if b["key"] != _DOCS_PREFIX]
+
+    names: list[str] = []
+    for item in items:
+        name = item["key"][len(_DOCS_PREFIX):]
+        name = name.replace("\\", "/").split("/")[-1]     # กัน path traversal อีกชั้น
+        if not name:
+            continue
+        data = blobstore.get(item["key"])
+        if data is None:
+            continue
+        (target / name).write_bytes(data)
+        names.append(name)
+
+    return names
+
+
 # --------------------------------------------------------------------------- #
 def ingest(data_dir: Path | None = None) -> dict:
-    """อ่านเอกสารทั้งหมดใน data/ -> ตัด chunk -> embed -> เซฟ index"""
-    data_dir = data_dir or config.DATA_DIR
+    """อ่านเอกสารทั้งหมด -> ตัด chunk -> embed -> เซฟ index
+
+    ในเครื่อง (เขียนดิสก์ได้): อ่านจาก data_dir (ปกติ config.DATA_DIR) แล้วเซฟ index ลงดิสก์
+    บน Vercel (READ_ONLY_FS + ตั้ง Blob ไว้): ดึงเอกสารที่อัปผ่านหน้าเว็บมาจาก Blob ใต้ docs/
+        ลง /tmp ก่อน ประมวลผลที่นั่น แล้ว push index กลับขึ้น Blob ให้เสร็จในคำขอเดียว
+        ทำให้กด "สร้าง Index" จากหน้าเว็บได้ตรง ๆ โดยไม่ต้องเปิดเครื่องรันสคริปต์เอง
+    """
+    global index_source
+
+    use_blob = config.READ_ONLY_FS and blobstore.enabled()
+
+    if data_dir is None:
+        if use_blob:
+            data_dir = _runtime_dir() / "docs-src"
+            fetched = _fetch_docs_from_blob(data_dir)
+            if not fetched:
+                return {
+                    "ok": False,
+                    "message": (
+                        "ยังไม่มีเอกสารบน Blob เลยค่ะ — อัปโหลดไฟล์เอกสารก่อน "
+                        "แล้วค่อยกด \u201cสร้าง Index\u201d อีกครั้ง"
+                    ),
+                    "files": [],
+                    "failed": [],
+                    "chunks": 0,
+                }
+        else:
+            data_dir = config.DATA_DIR
 
     sections: list[RawSection] = []
     files_ok: list[dict] = []
@@ -142,9 +194,8 @@ def ingest(data_dir: Path | None = None) -> dict:
     vectors, backend = embedder.embed_documents([c.text for c in chunks])
 
     _store.build(chunks, vectors, backend, datetime.now().isoformat(timespec="seconds"))
-    _store.save()
 
-    return {
+    result = {
         "ok": True,
         "message": f"สร้าง index สำเร็จ {len(chunks)} chunk จาก {len(files_ok)} ไฟล์",
         "files": files_ok,
@@ -154,6 +205,23 @@ def ingest(data_dir: Path | None = None) -> dict:
         "built_at": _store.built_at,
         "redacted_names": redacted,
     }
+
+    if use_blob:
+        # เซฟที่ /tmp ก่อน (ดิสก์จริงเขียนไม่ได้) แล้ว push ขึ้น Blob ทันที
+        # เครื่องอื่น/รอบ cold start ถัดไปจะเห็นความรู้ชุดใหม่โดยไม่ต้อง deploy ใหม่
+        try:
+            out_dir = _runtime_dir() / "index-out"
+            _store.save(out_dir)
+            push_index(out_dir)
+            index_source = "blob"
+            result["message"] += " และอัปขึ้น Blob ให้ทุกคนใช้งานทันทีแล้วค่ะ"
+        except Exception as exc:  # noqa: BLE001 — ให้รู้ผล ingest ก่อน ถึงจะ push ต่อไม่สำเร็จ
+            log.error("push index ขึ้น Blob ไม่สำเร็จ: %s", exc)
+            result["message"] += f" แต่อัปขึ้น Blob ไม่สำเร็จ ({exc}) — ลองกดสร้าง Index ใหม่อีกครั้งนะคะ"
+    else:
+        _store.save()
+
+    return result
 
 
 # --------------------------------------------------------------------------- #

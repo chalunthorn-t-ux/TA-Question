@@ -464,19 +464,32 @@ async def api_ask(request: Request, payload: AskRequest):
 
 @app.post("/api/ingest")
 async def api_ingest(user: auth.User = Depends(require_admin)):
-    # บน serverless สร้าง index ที่นี่ไม่ได้: เขียนไฟล์ไม่ได้ และมีเพดานเวลา 60 วิ
-    # ถ้าปล่อยให้เริ่มแล้วไปตายกลางทาง จะได้ index ครึ่ง ๆ กลาง ๆ ซึ่งแย่กว่าไม่ทำเลย
-    if config.READ_ONLY_FS:
+    # บน serverless ดิสก์เขียนไม่ได้ — ถ้าตั้ง Blob ไว้แล้ว pipeline.ingest() จะดึงเอกสาร
+    # จาก Blob มาประมวลผลที่ /tmp แล้ว push index กลับขึ้น Blob ให้เองในคำขอเดียว
+    # (กด "สร้าง Index" จากหน้าเว็บได้ตรง ๆ ไม่ต้องเปิดเครื่องรันสคริปต์)
+    # ต้องมี Blob ตั้งไว้ก่อนเท่านั้น ไม่งั้นไม่มีที่เก็บทั้งเอกสารต้นฉบับและ index เลย
+    if config.READ_ONLY_FS and not blobstore.enabled():
         raise HTTPException(
             status_code=409,
             detail=(
-                "เวอร์ชันบนเซิร์ฟเวอร์สร้าง index ไม่ได้ค่ะ — ให้รันในเครื่องแทน: "
-                "python scripts/pull_docs.py แล้ว python scripts/ingest.py --push "
-                "เว็บจะเห็นความรู้ชุดใหม่ทันทีโดยไม่ต้อง deploy"
+                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN "
+                "จึงสร้าง index ผ่านเว็บไม่ได้ค่ะ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
             ),
         )
 
-    result = await run_in_threadpool(pipeline.ingest)
+    try:
+        result = await run_in_threadpool(pipeline.ingest)
+    except Exception as exc:  # noqa: BLE001 — กันเอกสารเยอะจนเกินเพดานเวลาแล้วเว็บพัง 500 เปล่า ๆ
+        log.error("สร้าง index ผ่านเว็บไม่สำเร็จ: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "สร้าง index ผ่านเว็บไม่สำเร็จค่ะ (อาจเพราะเอกสารเยอะเกินเวลาที่เซิร์ฟเวอร์ให้ต่อคำขอ) "
+                "ลองกดใหม่อีกครั้ง หรือถ้าเอกสารเยอะมาก ให้รันในเครื่องแทน: "
+                "python scripts/pull_docs.py แล้วตามด้วย python scripts/ingest.py --push"
+            ),
+        ) from exc
+
     if not result["ok"]:
         return JSONResponse(result, status_code=422)
     return result
@@ -540,11 +553,7 @@ async def api_upload(
     if not saved and rejected:
         raise HTTPException(status_code=422, detail={"saved": saved, "rejected": rejected})
 
-    next_step = (
-        "รันในเครื่อง: python scripts/pull_docs.py แล้ว python scripts/ingest.py --push"
-        if to_blob
-        else "กด “สร้าง Index” เพื่อให้ระบบเรียนรู้"
-    )
+    next_step = "กด “สร้าง Index” เพื่อให้ระบบเรียนรู้"
     return {
         "ok": True,
         "saved": saved,
