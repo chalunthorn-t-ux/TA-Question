@@ -67,7 +67,7 @@ def put(key: str, data: bytes, content_type: str = "application/octet-stream") -
         content=data,
         headers=_auth_headers(
             {
-                "access": access_mode(),
+                "x-vercel-blob-access": access_mode(),
                 "x-content-type": content_type,
                 "x-cache-control-max-age": _CACHE_MAX_AGE,
                 # ค่าเริ่มต้นของ Vercel คือห้ามเขียนทับ ถ้าไม่ส่งอันนี้
