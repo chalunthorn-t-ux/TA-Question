@@ -287,7 +287,7 @@ def authenticate(raw_username: str, password: str) -> User:
     wait = _is_locked(username)
     if wait:
         raise AuthError(
-            f"กรอกรหัสผิดหลายครั้งเกินไป รบกวนรออีก {wait // 60 + 1} นาทีแล้วลองใหม่นะครับ"
+            f"กรอกรหัสผิดหลายครั้งเกินไป รบกวนรออีก {wait // 60 + 1} นาทีแล้วลองใหม่นะคะ"
         )
 
     record = users_repo.get(username)

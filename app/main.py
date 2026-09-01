@@ -444,8 +444,8 @@ async def api_ask(request: Request, payload: AskRequest):
             raise HTTPException(
                 status_code=429,
                 detail=(
-                    f"ถามถี่เกินไปครับ รบกวนรออีกประมาณ {wait // 60 + 1} นาทีแล้วลองใหม่ "
-                    "หรือสอบถามเจ้าหน้าที่โดยตรงได้เลยนะครับ"
+                    f"ถามถี่เกินไปค่ะ รบกวนรออีกประมาณ {wait // 60 + 1} นาทีแล้วลองใหม่ "
+                    "หรือสอบถามเจ้าหน้าที่โดยตรงได้เลยนะคะ"
                 ),
             )
 
@@ -470,7 +470,7 @@ async def api_ingest(user: auth.User = Depends(require_admin)):
         raise HTTPException(
             status_code=409,
             detail=(
-                "เวอร์ชันบนเซิร์ฟเวอร์สร้าง index ไม่ได้ครับ — ให้รันในเครื่องแทน: "
+                "เวอร์ชันบนเซิร์ฟเวอร์สร้าง index ไม่ได้ค่ะ — ให้รันในเครื่องแทน: "
                 "python scripts/pull_docs.py แล้ว python scripts/ingest.py --push "
                 "เว็บจะเห็นความรู้ชุดใหม่ทันทีโดยไม่ต้อง deploy"
             ),
@@ -500,7 +500,7 @@ async def api_upload(
             status_code=409,
             detail=(
                 "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN "
-                "จึงยังรับไฟล์ไม่ได้ครับ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
+                "จึงยังรับไฟล์ไม่ได้ค่ะ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
             ),
         )
 

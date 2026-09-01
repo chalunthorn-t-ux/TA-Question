@@ -86,7 +86,7 @@ def push_index(directory: Path | None = None) -> list[dict]:
     if not blobstore.enabled():
         raise RuntimeError(
             "ยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN — สร้าง Blob store ที่ Vercel "
-            "แล้วก็อปโทเคนมาใส่ .env ก่อนนะครับ"
+            "แล้วก็อปโทเคนมาใส่ .env ก่อนนะคะ"
         )
 
     directory = directory or config.INDEX_DIR
@@ -164,7 +164,7 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
     question = (question or "").strip()
     if not question:
         return {
-            "answer": "กรุณาพิมพ์คำถามก่อนนะครับ",
+            "answer": "กรุณาพิมพ์คำถามก่อนนะคะ",
             "sources": [],
             "status": "empty_question",
             "top_score": 0.0,
@@ -173,8 +173,8 @@ def ask(question: str, history: list[dict] | None = None, top_k: int | None = No
     if _store.is_empty:
         return {
             "answer": (
-                "ยังไม่มีข้อมูลในระบบเลยครับ — วางไฟล์เอกสารไว้ในโฟลเดอร์ `data/` "
-                "แล้วกดปุ่ม **สร้าง Index** ที่แถบด้านซ้ายก่อนนะครับ"
+                "ยังไม่มีข้อมูลในระบบเลยค่ะ — วางไฟล์เอกสารไว้ในโฟลเดอร์ `data/` "
+                "แล้วกดปุ่ม **สร้าง Index** ที่แถบด้านซ้ายก่อนนะคะ"
             ),
             "sources": [],
             "status": "no_index",
