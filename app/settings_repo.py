@@ -37,6 +37,11 @@ def available() -> bool:
 def _refresh() -> None:
     global _cache, _cache_at
 
+    if not db.ensure_schema():
+        _cache = {}
+        _cache_at = time.monotonic()
+        return
+
     try:
         with db.connect() as conn:
             rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
@@ -62,6 +67,8 @@ def set(key: str, value: str) -> None:
         raise ValueError(f"ไม่รู้จักค่าตั้งชื่อ '{key}'")
     if not db.enabled():
         raise RuntimeError("ยังไม่ได้ตั้ง DATABASE_URL จึงบันทึกค่าตั้งไม่ได้")
+    if not db.ensure_schema():
+        raise RuntimeError("เตรียมตารางในฐานข้อมูลไม่สำเร็จ จึงบันทึกค่าตั้งไม่ได้")
 
     with db.connect() as conn:
         conn.execute(

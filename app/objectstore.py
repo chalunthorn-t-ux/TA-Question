@@ -36,6 +36,7 @@ def enabled() -> bool:
 # หลังบ้าน: Postgres (ตาราง app_files)
 # --------------------------------------------------------------------------- #
 def _pg_put(key: str, data: bytes) -> str:
+    db.ensure_schema()
     with db.connect() as conn:
         conn.execute(
             """
@@ -50,12 +51,16 @@ def _pg_put(key: str, data: bytes) -> str:
 
 
 def _pg_get(key: str) -> bytes | None:
+    if not db.ensure_schema():
+        return None
     with db.connect() as conn:
         row = conn.execute("SELECT data FROM app_files WHERE key = %s", (key,)).fetchone()
     return bytes(row[0]) if row else None
 
 
 def _pg_list(subprefix: str) -> list[dict]:
+    if not db.ensure_schema():
+        return []
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT key, size FROM app_files WHERE key LIKE %s ORDER BY key",

@@ -95,6 +95,30 @@ def init_schema() -> None:
     log.info("เตรียมตารางในฐานข้อมูลเรียบร้อย")
 
 
+# สร้างตารางครั้งเดียวต่อ process — ต้องเป็นแบบ lazy เพราะโค้ดบางส่วน
+# (เช่นคีย์เซ็นคุกกี้) ถูกเรียกตั้งแต่ตอน import ก่อน lifespan จะได้ทำงาน
+_schema_ready = False
+
+
+def ensure_schema() -> bool:
+    """เตรียมตารางถ้ายังไม่ได้ทำในรอบนี้ คืน False ถ้าทำไม่สำเร็จ"""
+    global _schema_ready
+
+    if _schema_ready:
+        return True
+    if not enabled():
+        return False
+
+    try:
+        init_schema()
+    except Exception as exc:      # noqa: BLE001 — ต่อฐานข้อมูลไม่ได้ ไม่ควรทำให้แอปล้ม
+        log.warning("เตรียมตารางไม่สำเร็จ: %s", exc)
+        return False
+
+    _schema_ready = True
+    return True
+
+
 def ping() -> str:
     """คืนข้อความ error ถ้าต่อไม่ได้ คืนค่าว่างถ้าต่อได้"""
     try:
