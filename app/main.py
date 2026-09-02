@@ -680,9 +680,15 @@ async def healthz():
     store = pipeline.get_store()
     problems: list[str] = []
 
-    if not config.has_api_key():
+    # อ่านค่าครั้งเดียวแล้วใช้ทั้ง problems และ checks
+    # ถ้าเรียกซ้ำสองรอบ อาจได้คนละคำตอบเมื่อ cache อุ่นขึ้นระหว่างนั้น
+    # แล้วรายงานขัดกันเอง (checks บอกพร้อม แต่ problems บอกยังไม่ได้ตั้ง)
+    has_key = config.has_api_key()
+    has_secret = auth.has_session_secret()
+
+    if not has_key:
         problems.append("ยังไม่ได้ตั้ง GEMINI_API_KEY -> ตอบคำถามไม่ได้")
-    if not auth.has_session_secret():
+    if not has_secret:
         problems.append(
             "ยังไม่ได้ตั้ง SESSION_SECRET -> ล็อกอินไม่สำเร็จ (คุกกี้ใช้ต่อไม่ได้)"
             if config.READ_ONLY_FS
@@ -718,8 +724,8 @@ async def healthz():
     return {
         "status": "ok" if not problems else "misconfigured",
         "checks": {
-            "gemini_api_key": config.has_api_key(),
-            "session_secret": auth.has_session_secret(),
+            "gemini_api_key": has_key,
+            "session_secret": has_secret,
             "session_https_only": config.SESSION_HTTPS_ONLY,
             "read_only_filesystem": config.READ_ONLY_FS,
             "index_chunks": len(store.chunks),

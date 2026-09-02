@@ -27,7 +27,11 @@ _ALLOWED = {KEY_SESSION_SECRET, KEY_GEMINI_API_KEY}
 # ไม่งั้นกลายเป็นยิง query เพิ่มทุก request
 _CACHE_TTL = 30.0
 _cache: dict[str, str] = {}
-_cache_at: float = 0.0
+# None = ยังไม่เคยอ่าน ต้องใช้ค่าที่แยกจาก "อ่านแล้วเมื่อเวลา 0" ให้ออก
+# บน serverless นาฬิกา monotonic เริ่มนับใหม่ใกล้ศูนย์ตอน container เกิด
+# ถ้าใช้ 0.0 เป็นค่าเริ่มต้น เงื่อนไข (now - 0.0 > TTL) จะเป็นเท็จใน 30 วินาทีแรก
+# = ไม่เคยอ่านฐานข้อมูลเลย แล้วรายงานว่ายังไม่ได้ตั้งค่าทั้งที่ตั้งไว้แล้ว
+_cache_at: float | None = None
 
 
 def available() -> bool:
@@ -55,7 +59,7 @@ def _refresh() -> None:
 def get(key: str) -> str:
     if not db.enabled():
         return ""
-    if time.monotonic() - _cache_at > _CACHE_TTL:
+    if _cache_at is None or time.monotonic() - _cache_at > _CACHE_TTL:
         _refresh()
     return _cache.get(key, "")
 
@@ -79,7 +83,7 @@ def set(key: str, value: str) -> None:
             """,
             (key, value),
         )
-    _cache_at = 0.0      # บังคับให้อ่านใหม่รอบหน้า
+    _cache_at = None     # บังคับให้อ่านใหม่รอบหน้า
 
 
 def get_or_create(key: str, factory) -> str:
