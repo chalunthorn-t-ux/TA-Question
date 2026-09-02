@@ -112,6 +112,13 @@ python scripts/ingest.py --push  # build index แล้วส่งขึ้น
 
 จากนั้นล็อกอินแล้วรีเฟรชหลาย ๆ ครั้งห่างกันสัก 1 นาที ต้องไม่เด้งกลับหน้า login
 
+### index บน Blob เป็นไฟล์เดียว
+
+เก็บ `index.json` + `vectors.npy` รวมเป็น `index-bundle.npz` ก้อนเดียว เพราะสองไฟล์แยกกัน
+อัปเดตไม่พร้อมกัน และ CDN ของ Vercel cache ไว้ได้ถึง 60 วินาที จึงมีช่วงที่ผู้อ่านได้
+metadata ใหม่ปนเวกเตอร์เก่า แล้วขึ้น `index เสียหาย: จำนวน chunk ไม่ตรงกับจำนวนเวกเตอร์`
+(เจอมาแล้วของจริง) ไฟล์เดียวจะได้ของเก่าทั้งชุดหรือใหม่ทั้งชุด ไม่มีทางปนกัน
+
 ### ⚠️ ความปลอดภัยของ Blob — ต้องสร้างเป็น Private store
 
 ตอนสร้าง blob store ให้เลือกโหมด **Private** เพราะ `index.json` มีเนื้อหาเอกสารจริงทั้งหมด
@@ -152,7 +159,8 @@ C:\Knowleage\
 ├── samples/               🧪 ข้อมูลสมมติสำหรับ demo — ขึ้น repo ได้
 ├── storage/               📦 index + บัญชี + vision cache — ไม่ขึ้น repo แล้ว
 ├── scripts/
-│   ├── ingest.py          สร้าง index จาก CLI (--push = ส่งขึ้น Blob ต่อ)
+│   ├── ingest.py          สร้าง index จาก CLI (--push ส่งขึ้น Blob, --replace ล้างของเดิม)
+│   ├── restore_index.py   กู้เอกสารที่หายไป โดยรวม index เก่าเข้ากับปัจจุบัน
 │   ├── push_index.py      ส่ง index ที่มีอยู่ขึ้น Blob
 │   ├── pull_docs.py       ดึงเอกสารที่อัปผ่านเว็บลงมาที่ data/
 │   └── users.py           จัดการบัญชี + init-db / migrate
@@ -190,7 +198,8 @@ loader จะจับคู่ให้ 1 แถว = 1 chunk ทำให้�
 | `GET` | `/` | หน้าเว็บ |
 | `GET` | `/api/status` | จำนวน chunk, เอกสาร, โมเดล, เวลาสร้าง index |
 | `POST` | `/api/ask` | `{question, history[], top_k?}` → `{answer, sources[], status}` |
-| `POST` | `/api/ingest` | สร้าง index ใหม่จากทุกไฟล์ใน `data/` |
+| `POST` | `/api/ingest` | เพิ่มเอกสารใหม่เข้า index (`?replace=1` = ล้างแล้วสร้างใหม่ทั้งหมด) |
+| `POST` | `/api/sources/remove` | เอาเอกสารหนึ่งไฟล์ออกจาก index (admin) |
 | `POST` | `/api/upload` | อัปโหลดไฟล์เข้า `data/` (multipart) |
 | `GET` | `/api/gaps` | คำถามที่ระบบตอบไม่ได้ (admin) |
 | `GET` | `/healthz` | health check |
@@ -264,6 +273,7 @@ PDF ที่สร้างจาก Word มักทำ **สระอำแ�
 | แจ้งเตือน "ใช้ embedding สำรอง (hashing)" | ยังไม่ใส่ `GEMINI_API_KEY` หรือคีย์ผิด — คุณภาพการค้นจะต่ำกว่าปกติ |
 | ตอบว่า "ยังไม่มีข้อมูลในระบบ" | ยังไม่ได้กด **สร้าง Index** หลังอัปโหลดไฟล์ |
 | `index เสียหาย: จำนวน chunk ไม่ตรง` | ลบโฟลเดอร์ `storage/` แล้วสร้าง index ใหม่ |
+| อัปไฟล์ใหม่แล้วเอกสารเก่าหาย | เกิดกับเวอร์ชันเก่าที่ ingest สร้างทับทั้งก้อน — ตอนนี้เป็นแบบเพิ่มเข้าไปแล้ว กู้ของเก่าด้วย `python scripts/restore_index.py --apply` |
 | ค้นไม่เจอทั้งที่มีข้อมูล | ลดค่า `MIN_SCORE` หรือลด `HYBRID_ALPHA` เป็น `0.5` เพื่อให้ keyword มีน้ำหนักขึ้น |
 | PDF อ่านได้ 0 ส่วน | เป็น PDF สแกน ต้อง OCR ก่อน (เช่นด้วย `ocrmypdf`) |
 | ล็อกอินแล้วเด้งกลับหน้า login ทุกครั้ง (บน Vercel) | ยังไม่ได้ตั้ง `SESSION_SECRET` เป็นค่าคงที่ |

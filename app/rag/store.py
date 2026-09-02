@@ -74,6 +74,78 @@ class VectorStore:
         self.built_at = built_at
         self._build_lexical()
 
+    def merge(
+        self,
+        chunks: list[Chunk],
+        vectors: np.ndarray,
+        backend: str,
+        built_at: str,
+    ) -> dict:
+        """เพิ่มเอกสารใหม่เข้า index เดิม แทนที่จะสร้างทับทั้งก้อน
+
+        เอกสารชื่อเดิม = อัปเดตทับเฉพาะไฟล์นั้น (ลบ chunk เก่าของมันออกก่อน)
+        เอกสารอื่นที่ไม่ได้ส่งมา = คงไว้เหมือนเดิม
+
+        มีไว้เพราะ build() ทับทั้งหมด ซึ่งทำให้ "อัปไฟล์ใหม่ 1 ไฟล์แล้วสร้าง index"
+        กลายเป็นลบความรู้เดิมทิ้งทั้งคลังโดยไม่มีอะไรเตือน
+        """
+        if self.is_empty:
+            self.build(chunks, vectors, backend, built_at)
+            return {"added": len(chunks), "replaced": 0, "kept": 0}
+
+        # เวกเตอร์ต่างโมเดลเทียบคะแนนกันไม่ได้ ผสมแล้วผลค้นจะมั่วแบบเงียบ ๆ
+        if backend != self.backend:
+            raise ValueError(
+                f"รวม index ไม่ได้: ของเดิมสร้างด้วย {self.backend} แต่ของใหม่เป็น {backend} "
+                "ต้องสร้าง index ใหม่ทั้งหมดด้วยโมเดลเดียวกัน"
+            )
+        if vectors.size and vectors.shape[1] != self.vectors.shape[1]:
+            raise ValueError(
+                f"รวม index ไม่ได้: มิติเวกเตอร์ไม่ตรงกัน "
+                f"({self.vectors.shape[1]} กับ {vectors.shape[1]})"
+            )
+
+        incoming = [c.to_dict() for c in chunks]
+        new_sources = {c["source"] for c in incoming}
+
+        keep = [i for i, c in enumerate(self.chunks) if c["source"] not in new_sources]
+        replaced = len(self.chunks) - len(keep)
+
+        kept_chunks = [self.chunks[i] for i in keep]
+        kept_vectors = self.vectors[keep] if keep else np.zeros(
+            (0, self.vectors.shape[1]), dtype=np.float32
+        )
+
+        self.chunks = kept_chunks + incoming
+        self.vectors = np.vstack([kept_vectors, vectors.astype(np.float32)])
+        self.built_at = built_at
+        self._build_lexical()
+
+        return {
+            "added": len(incoming),
+            "replaced": replaced,
+            "kept": len(kept_chunks),
+        }
+
+    def remove_source(self, source: str) -> int:
+        """ลบเอกสารหนึ่งไฟล์ออกจาก index คืนจำนวน chunk ที่ลบ
+
+        จำเป็นเมื่อ ingest เป็นแบบเพิ่มเข้าไป — ไม่งั้นเอาเอกสารออกจากคลังไม่ได้เลย
+        """
+        keep = [i for i, c in enumerate(self.chunks) if c["source"] != source]
+        removed = len(self.chunks) - len(keep)
+        if not removed:
+            return 0
+
+        self.chunks = [self.chunks[i] for i in keep]
+        self.vectors = (
+            self.vectors[keep]
+            if keep
+            else np.zeros((0, self.vectors.shape[1]), dtype=np.float32)
+        )
+        self._build_lexical()
+        return removed
+
     def _build_lexical(self) -> None:
         self._tf = []
         self._df = Counter()

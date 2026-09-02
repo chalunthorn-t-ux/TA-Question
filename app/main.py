@@ -10,6 +10,7 @@ import logging
 import shutil
 import time
 from contextlib import asynccontextmanager
+from functools import partial
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -463,7 +464,7 @@ async def api_ask(request: Request, payload: AskRequest):
 
 
 @app.post("/api/ingest")
-async def api_ingest(user: auth.User = Depends(require_admin)):
+async def api_ingest(replace: bool = False, user: auth.User = Depends(require_admin)):
     # บน serverless ดิสก์เขียนไม่ได้ — ถ้าตั้ง Blob ไว้แล้ว pipeline.ingest() จะดึงเอกสาร
     # จาก Blob มาประมวลผลที่ /tmp แล้ว push index กลับขึ้น Blob ให้เองในคำขอเดียว
     # (กด "สร้าง Index" จากหน้าเว็บได้ตรง ๆ ไม่ต้องเปิดเครื่องรันสคริปต์)
@@ -478,7 +479,7 @@ async def api_ingest(user: auth.User = Depends(require_admin)):
         )
 
     try:
-        result = await run_in_threadpool(pipeline.ingest)
+        result = await run_in_threadpool(partial(pipeline.ingest, replace=replace))
     except Exception as exc:  # noqa: BLE001 — กันเอกสารเยอะจนเกินเพดานเวลาแล้วเว็บพัง 500 เปล่า ๆ
         log.error("สร้าง index ผ่านเว็บไม่สำเร็จ: %s", exc)
         raise HTTPException(
@@ -492,6 +493,32 @@ async def api_ingest(user: auth.User = Depends(require_admin)):
 
     if not result["ok"]:
         return JSONResponse(result, status_code=422)
+    return result
+
+
+class RemoveRequest(BaseModel):
+    source: str = Field(min_length=1, max_length=400)
+
+
+@app.post("/api/sources/remove")
+async def api_remove_source(
+    payload: RemoveRequest, user: auth.User = Depends(require_admin)
+):
+    """เอาเอกสารหนึ่งไฟล์ออกจาก index
+
+    จำเป็นเพราะ ingest เป็นแบบเพิ่มเข้าไปแล้ว การลบไฟล์ออกจากคลังเอกสาร
+    จะไม่ทำให้มันหายจาก index เองอีกต่อไป
+    """
+    if config.READ_ONLY_FS and not blobstore.enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN ค่ะ",
+        )
+
+    result = await run_in_threadpool(pipeline.remove_document, payload.source)
+    if not result["ok"]:
+        return JSONResponse(result, status_code=404)
+    log.info("ลบเอกสารออกจาก index: %s (โดย %s)", payload.source, user.username)
     return result
 
 

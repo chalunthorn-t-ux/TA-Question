@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
 
 from .. import blobstore, config
 from . import embedder, llm, redact
@@ -18,8 +21,14 @@ log = logging.getLogger(__name__)
 
 _store = VectorStore()
 
-# ไฟล์ที่ประกอบกันเป็น index หนึ่งชุด — ต้องไปด้วยกันเสมอ
+# ไฟล์ที่ประกอบกันเป็น index หนึ่งชุดบนดิสก์
 INDEX_FILES = ("index.json", "vectors.npy")
+
+# บน Blob เก็บรวมเป็นไฟล์เดียว เพราะสองไฟล์แยกกันอัปเดตไม่พร้อมกัน
+# และ CDN cache ไว้ได้ถึง 60 วินาที ทำให้มีช่วงที่อ่านได้ meta ใหม่ปนเวกเตอร์เก่า
+# = index ฉีกขาด ("จำนวน chunk ไม่ตรงกับจำนวนเวกเตอร์") ซึ่งเจอมาแล้วของจริง
+# ไฟล์เดียวจะได้ของเก่าทั้งชุดหรือใหม่ทั้งชุดเท่านั้น ไม่มีทางปนกัน
+INDEX_BUNDLE = "index-bundle.npz"
 
 # บอกว่า index ที่โหลดอยู่มาจากไหน ("blob" / "disk" / "none") ใช้รายงานใน /healthz
 index_source: str = "none"
@@ -42,8 +51,18 @@ def _fetch_index_from_blob() -> Path | None:
     target = _runtime_dir()
     target.mkdir(parents=True, exist_ok=True)
 
+    # fresh=True เพราะ index ที่เพิ่งอัปต้องเห็นทันที ไม่ใช่รอ CDN หมดอายุ
+    bundle = blobstore.get(INDEX_BUNDLE, fresh=True)
+    if bundle is not None:
+        with np.load(io.BytesIO(bundle), allow_pickle=False) as data:
+            (target / "index.json").write_bytes(data["meta"].tobytes())
+            np.save(target / "vectors.npy", data["vectors"])
+        return target
+
+    # index ที่ push ไว้ก่อนเปลี่ยนมาเก็บเป็นไฟล์เดียว — ยังอ่านได้
+    log.info("ไม่พบ %s บน Blob ลองอ่านแบบไฟล์แยกของเดิม", INDEX_BUNDLE)
     for name in INDEX_FILES:
-        data = blobstore.get(name)
+        data = blobstore.get(name, fresh=True)
         if data is None:
             log.warning("ยังไม่มี %s บน Blob — ข้ามไปใช้ index ในดิสก์แทน", name)
             return None
@@ -90,18 +109,25 @@ def push_index(directory: Path | None = None) -> list[dict]:
         )
 
     directory = directory or config.INDEX_DIR
-    uploaded: list[dict] = []
 
     for name in INDEX_FILES:
-        path = directory / name
-        if not path.exists():
-            raise FileNotFoundError(f"ไม่พบ {path} — รัน ingest ให้เสร็จก่อนแล้วค่อย push")
-        data = path.read_bytes()
-        content_type = "application/json" if name.endswith(".json") else "application/octet-stream"
-        url = blobstore.put(name, data, content_type)
-        uploaded.append({"name": name, "bytes": len(data), "url": url})
+        if not (directory / name).exists():
+            raise FileNotFoundError(
+                f"ไม่พบ {directory / name} — รัน ingest ให้เสร็จก่อนแล้วค่อย push"
+            )
 
-    return uploaded
+    # รวมเป็นไฟล์เดียวก่อนอัป เพื่อให้การอัปเดตเป็น atomic
+    meta = (directory / "index.json").read_bytes()
+    vectors = np.load(directory / "vectors.npy")
+
+    buf = io.BytesIO()
+    np.savez_compressed(
+        buf, meta=np.frombuffer(meta, dtype=np.uint8), vectors=vectors
+    )
+    data = buf.getvalue()
+
+    url = blobstore.put(INDEX_BUNDLE, data, "application/octet-stream")
+    return [{"name": INDEX_BUNDLE, "bytes": len(data), "url": url}]
 
 
 _DOCS_PREFIX = "docs/"
@@ -131,8 +157,53 @@ def _fetch_docs_from_blob(target: Path) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-def ingest(data_dir: Path | None = None) -> dict:
+def _persist() -> str:
+    """เซฟ index ที่อยู่ในหน่วยความจำลงที่เก็บถาวร คืนข้อความต่อท้ายให้ผู้ใช้อ่าน"""
+    global index_source
+
+    if not (config.READ_ONLY_FS and blobstore.enabled()):
+        _store.save()
+        index_source = "disk"
+        return ""
+
+    # เซฟที่ /tmp ก่อน (ดิสก์จริงเขียนไม่ได้) แล้ว push ขึ้น Blob ทันที
+    # เครื่องอื่น/รอบ cold start ถัดไปจะเห็นความรู้ชุดใหม่โดยไม่ต้อง deploy ใหม่
+    try:
+        out_dir = _runtime_dir() / "index-out"
+        _store.save(out_dir)
+        push_index(out_dir)
+        index_source = "blob"
+        return " และอัปขึ้น Blob ให้ทุกคนใช้งานทันทีแล้วค่ะ"
+    except Exception as exc:  # noqa: BLE001 — ให้รู้ผลก่อน ถึงจะ push ต่อไม่สำเร็จ
+        log.error("push index ขึ้น Blob ไม่สำเร็จ: %s", exc)
+        return f" แต่อัปขึ้น Blob ไม่สำเร็จ ({exc}) — ลองกดใหม่อีกครั้งนะคะ"
+
+
+def remove_document(source: str) -> dict:
+    """เอาเอกสารหนึ่งไฟล์ออกจาก index
+
+    คู่กับ ingest แบบเพิ่มเข้าไป — ถ้าไม่มีทางลบ คลังจะมีแต่โตขึ้นอย่างเดียว
+    """
+    removed = _store.remove_source(source)
+    if not removed:
+        return {"ok": False, "message": f"ไม่พบเอกสารชื่อ “{source}” ใน index ค่ะ", "removed": 0}
+
+    _store.built_at = datetime.now().isoformat(timespec="seconds")
+    note = _persist()
+    return {
+        "ok": True,
+        "message": f"เอาเอกสาร “{source}” ออกจาก index แล้วค่ะ ({removed} chunk){note}",
+        "removed": removed,
+        "chunks": len(_store.chunks),
+    }
+
+
+def ingest(data_dir: Path | None = None, *, replace: bool = False) -> dict:
     """อ่านเอกสารทั้งหมด -> ตัด chunk -> embed -> เซฟ index
+
+    ค่าเริ่มต้นคือ **เพิ่มเข้าไปใน index เดิม** ไม่ใช่สร้างทับ
+    เอกสารชื่อเดิมจะถูกอัปเดตทับเฉพาะไฟล์นั้น ไฟล์อื่นที่ไม่ได้ส่งมาคงอยู่เหมือนเดิม
+    ตั้ง replace=True เมื่อจงใจล้างคลังแล้วสร้างใหม่ทั้งหมด
 
     ในเครื่อง (เขียนดิสก์ได้): อ่านจาก data_dir (ปกติ config.DATA_DIR) แล้วเซฟ index ลงดิสก์
     บน Vercel (READ_ONLY_FS + ตั้ง Blob ไว้): ดึงเอกสารที่อัปผ่านหน้าเว็บมาจาก Blob ใต้ docs/
@@ -192,36 +263,45 @@ def ingest(data_dir: Path | None = None) -> dict:
 
     chunks = chunk_sections(sections, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
     vectors, backend = embedder.embed_documents([c.text for c in chunks])
+    built_at = datetime.now().isoformat(timespec="seconds")
 
-    _store.build(chunks, vectors, backend, datetime.now().isoformat(timespec="seconds"))
+    if replace:
+        _store.build(chunks, vectors, backend, built_at)
+        stats = {"added": len(chunks), "replaced": len(chunks), "kept": 0}
+        headline = f"สร้าง index ใหม่ทั้งหมด {len(chunks)} chunk จาก {len(files_ok)} ไฟล์"
+    else:
+        try:
+            stats = _store.merge(chunks, vectors, backend, built_at)
+        except ValueError as exc:
+            # โมเดล embedding ไม่ตรงกัน — รวมไม่ได้ ต้องให้คนตัดสินใจ ไม่ใช่เงียบ ๆ ทับ
+            return {
+                "ok": False,
+                "message": f"{exc} (กด “สร้างใหม่ทั้งหมด” ถ้าตั้งใจล้างคลังเดิม)",
+                "files": files_ok,
+                "failed": files_failed,
+                "chunks": len(_store.chunks),
+            }
+        headline = (
+            f"เพิ่มเข้า index แล้ว {stats['added']} chunk จาก {len(files_ok)} ไฟล์"
+            + (f" (อัปเดตทับของเดิม {stats['replaced']} chunk)" if stats["replaced"] else "")
+            + (f" และคงเอกสารเดิมไว้ {stats['kept']} chunk" if stats["kept"] else "")
+        )
 
-    result = {
+    note = _persist()
+
+    return {
         "ok": True,
-        "message": f"สร้าง index สำเร็จ {len(chunks)} chunk จาก {len(files_ok)} ไฟล์",
+        "message": headline + note,
         "files": files_ok,
         "failed": files_failed,
-        "chunks": len(chunks),
+        "chunks": len(_store.chunks),
+        "added": stats["added"],
+        "replaced": stats["replaced"],
+        "kept": stats["kept"],
         "backend": backend,
         "built_at": _store.built_at,
         "redacted_names": redacted,
     }
-
-    if use_blob:
-        # เซฟที่ /tmp ก่อน (ดิสก์จริงเขียนไม่ได้) แล้ว push ขึ้น Blob ทันที
-        # เครื่องอื่น/รอบ cold start ถัดไปจะเห็นความรู้ชุดใหม่โดยไม่ต้อง deploy ใหม่
-        try:
-            out_dir = _runtime_dir() / "index-out"
-            _store.save(out_dir)
-            push_index(out_dir)
-            index_source = "blob"
-            result["message"] += " และอัปขึ้น Blob ให้ทุกคนใช้งานทันทีแล้วค่ะ"
-        except Exception as exc:  # noqa: BLE001 — ให้รู้ผล ingest ก่อน ถึงจะ push ต่อไม่สำเร็จ
-            log.error("push index ขึ้น Blob ไม่สำเร็จ: %s", exc)
-            result["message"] += f" แต่อัปขึ้น Blob ไม่สำเร็จ ({exc}) — ลองกดสร้าง Index ใหม่อีกครั้งนะคะ"
-    else:
-        _store.save()
-
-    return result
 
 
 # --------------------------------------------------------------------------- #

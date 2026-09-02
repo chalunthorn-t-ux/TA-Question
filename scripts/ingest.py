@@ -24,6 +24,10 @@ def main() -> int:
         help="โฟลเดอร์เอกสารต้นทาง (ค่าเริ่มต้น: ./data)",
     )
     parser.add_argument(
+        "--replace", action="store_true",
+        help="ล้าง index เดิมแล้วสร้างใหม่ทั้งหมด (ค่าเริ่มต้นคือเพิ่มเข้าไปในของเดิม)",
+    )
+    parser.add_argument(
         "--push", action="store_true",
         help="อัป index ขึ้น Vercel Blob ต่อทันทีเมื่อสร้างสำเร็จ",
     )
@@ -43,7 +47,7 @@ def main() -> int:
         print("🔒 ลบชื่อบุคคล    : ปิด")
     print("-" * 58)
 
-    result = pipeline.ingest(args.data_dir)
+    result = pipeline.ingest(args.data_dir, replace=args.replace)
 
     for f in result.get("files", []):
         print(f"  ✅ {f['name']:<45} {f['sections']:>4} ส่วน")

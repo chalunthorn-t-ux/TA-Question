@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import httpx
 
@@ -136,15 +137,21 @@ def _url_for(key: str, *, refresh: bool = False) -> str:
     return _url_for(key, refresh=True)
 
 
-def get(key: str) -> bytes | None:
+def get(key: str, *, fresh: bool = False) -> bytes | None:
     """ดาวน์โหลดไฟล์ คืน None ถ้าไม่มี (ไม่ใช่ error — index อาจยังไม่เคย push)
 
     store แบบ private อ่านได้เฉพาะคนที่ถือ token จึงต้องแนบ authorization ไปด้วย
     ส่วน store แบบ public จะไม่สนใจ header นี้ ใช้เส้นทางเดียวกันได้ทั้งคู่
+
+    fresh=True เติม query param สุ่มเพื่อเลี่ยง CDN cache (Vercel cache ไว้ได้ถึง 60 วินาที)
+    ใช้กับไฟล์ที่อ่านของเก่าแล้วผิดจริง ๆ เช่น index ที่เพิ่งอัปใหม่
     """
     url = _url_for(key)
     if not url:
         return None
+
+    if fresh:
+        url += ("&" if "?" in url else "?") + f"ts={int(time.time())}"
 
     resp = httpx.get(
         url,
