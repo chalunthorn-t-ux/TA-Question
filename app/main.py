@@ -35,6 +35,15 @@ log = logging.getLogger("ta-assistant")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # สร้างตารางที่ยังไม่มีให้เอง — เรียกซ้ำได้ ไม่พัง
+    # ถ้าไม่ทำ ผู้ใช้ต้องรู้เองว่าต้องรัน scripts/users.py init-db ก่อน
+    # ซึ่งอาการเวลาลืมคือ "ล็อกอินไม่ติด/ไม่มีความรู้" ที่ไล่หาสาเหตุยากมาก
+    if db.enabled():
+        try:
+            await run_in_threadpool(db.init_schema)
+        except Exception as exc:  # noqa: BLE001 — ต่อฐานข้อมูลไม่ได้ ไม่ควรทำให้แอปไม่ขึ้น
+            log.critical("เตรียมตารางในฐานข้อมูลไม่สำเร็จ: %s", exc)
+
     if pipeline.load_index():
         store = pipeline.get_store()
         log.info(
