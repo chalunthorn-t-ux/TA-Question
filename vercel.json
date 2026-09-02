@@ -5,5 +5,11 @@
       "includeFiles": "{app,templates,static}/**",
       "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
 }
