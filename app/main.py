@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -22,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import auth, blobstore, config, db, gaps
+from . import auth, config, db, gaps, objectstore, settings_repo
 from .rag import pipeline
 
 logging.basicConfig(
@@ -273,6 +274,59 @@ def _take_flash(request: Request) -> dict | None:
     return request.session.pop("flash", None)
 
 
+@app.get("/admin/settings")
+async def settings_page(request: Request, user: auth.User = Depends(require_admin)):
+    """ตั้งค่าที่จำเป็นจากหน้าเว็บ แทนการไปตั้ง env ที่ผู้ให้บริการ
+
+    มีหน้านี้เพราะ env บน Vercel ที่ทำเป็น Sensitive แล้วอ่านกลับไม่ได้
+    และแก้ทีต้อง redeploy — ทำให้ตั้งค่าผิดแล้วไล่หาสาเหตุยากมาก
+    """
+    store = pipeline.get_store()
+    from_env = bool(os.getenv("SESSION_SECRET", "").strip())
+    return templates.TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={
+            "title": config.APP_TITLE,
+            "user": user,
+            "flash": _take_flash(request),
+            "db_ready": db.enabled(),
+            "user_storage": auth.storage_backend(),
+            "object_storage": objectstore.backend(),
+            "has_session_secret": auth.has_session_secret(),
+            "session_secret_from": "environment" if from_env else (
+                "ฐานข้อมูล" if settings_repo.get(settings_repo.KEY_SESSION_SECRET) else "-"
+            ),
+            "has_api_key": config.has_api_key(),
+            "api_key_from": "environment" if config.GEMINI_API_KEY else (
+                "ฐานข้อมูล" if config.has_api_key() else "-"
+            ),
+            "chunk_count": len(store.chunks),
+            "document_count": len(store.sources()),
+            "index_source": pipeline.index_source,
+        },
+    )
+
+
+@app.post("/admin/settings/api-key")
+async def settings_api_key(
+    request: Request,
+    api_key: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    key = api_key.strip()
+    try:
+        await run_in_threadpool(settings_repo.set, settings_repo.KEY_GEMINI_API_KEY, key)
+    except Exception as exc:  # noqa: BLE001
+        _flash(request, f"บันทึกคีย์ไม่สำเร็จ: {exc}", "error")
+        return RedirectResponse("/admin/settings", status_code=HTTP_303_SEE_OTHER)
+
+    # อย่าเขียนคีย์ลง log — บอกแค่ว่าใครเปลี่ยนและยาวเท่าไร
+    log.info("อัปเดต Gemini API key (โดย %s, ยาว %d ตัวอักษร)", user.username, len(key))
+    _flash(request, "บันทึกคีย์แล้ว ระบบพร้อมตอบคำถามทันที")
+    return RedirectResponse("/admin/settings", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/admin/users")
 async def users_page(request: Request, user: auth.User = Depends(require_admin)):
     return templates.TemplateResponse(
@@ -469,12 +523,12 @@ async def api_ingest(replace: bool = False, user: auth.User = Depends(require_ad
     # จาก Blob มาประมวลผลที่ /tmp แล้ว push index กลับขึ้น Blob ให้เองในคำขอเดียว
     # (กด "สร้าง Index" จากหน้าเว็บได้ตรง ๆ ไม่ต้องเปิดเครื่องรันสคริปต์)
     # ต้องมี Blob ตั้งไว้ก่อนเท่านั้น ไม่งั้นไม่มีที่เก็บทั้งเอกสารต้นฉบับและ index เลย
-    if config.READ_ONLY_FS and not blobstore.enabled():
+    if config.READ_ONLY_FS and not objectstore.enabled():
         raise HTTPException(
             status_code=409,
             detail=(
-                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN "
-                "จึงสร้าง index ผ่านเว็บไม่ได้ค่ะ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
+                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่มีที่เก็บถาวรค่ะ — "
+                "ต้องตั้ง DATABASE_URL หรือ BLOB_READ_WRITE_TOKEN อย่างน้อยหนึ่งอย่างก่อน"
             ),
         )
 
@@ -509,10 +563,10 @@ async def api_remove_source(
     จำเป็นเพราะ ingest เป็นแบบเพิ่มเข้าไปแล้ว การลบไฟล์ออกจากคลังเอกสาร
     จะไม่ทำให้มันหายจาก index เองอีกต่อไป
     """
-    if config.READ_ONLY_FS and not blobstore.enabled():
+    if config.READ_ONLY_FS and not objectstore.enabled():
         raise HTTPException(
             status_code=409,
-            detail="เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN ค่ะ",
+            detail="เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่มีที่เก็บถาวรค่ะ",
         )
 
     result = await run_in_threadpool(pipeline.remove_document, payload.source)
@@ -533,9 +587,9 @@ async def api_upload(
     รันบน Vercel -> ดิสก์เขียนไม่ได้ จึงพักไว้บน Blob ใต้ docs/
                     ฝั่งเครื่องดึงลงมาด้วย scripts/pull_docs.py แล้ว ingest --push
     """
-    to_blob = config.READ_ONLY_FS and blobstore.enabled()
+    to_store = config.READ_ONLY_FS and objectstore.enabled()
 
-    if config.READ_ONLY_FS and not to_blob:
+    if config.READ_ONLY_FS and not to_store:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -559,10 +613,10 @@ async def api_upload(
             continue
 
         try:
-            if to_blob:
+            if to_store:
                 data = await run_in_threadpool(upload.file.read)
                 await run_in_threadpool(
-                    blobstore.put,
+                    objectstore.put,
                     f"docs/{safe_name}",
                     data,
                     upload.content_type or "application/octet-stream",
@@ -585,7 +639,7 @@ async def api_upload(
         "ok": True,
         "saved": saved,
         "rejected": rejected,
-        "staged_to_blob": to_blob,
+        "staged_to_blob": to_store,
         "message": f"อัปโหลด {len(saved)} ไฟล์แล้ว — {next_step}",
     }
 
@@ -646,9 +700,10 @@ async def healthz():
         problems.append(
             "ยังไม่ได้ตั้ง DATABASE_URL บนเซิร์ฟเวอร์ที่เขียนไฟล์ไม่ได้ -> สมัคร/แก้บัญชีไม่ได้"
         )
-    if config.READ_ONLY_FS and not blobstore.enabled():
+    if config.READ_ONLY_FS and not objectstore.enabled():
         problems.append(
-            "ยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN -> อัปเดตความรู้ได้เฉพาะตอน deploy ใหม่เท่านั้น"
+            "ไม่มีที่เก็บถาวร (DATABASE_URL หรือ BLOB_READ_WRITE_TOKEN) "
+            "-> อัปเดตความรู้ได้เฉพาะตอน deploy ใหม่เท่านั้น"
         )
 
     return {
@@ -663,7 +718,7 @@ async def healthz():
             "index_source": pipeline.index_source,
             "embed_backend": store.backend,
             "user_storage": auth.storage_backend(),
-            "blob_storage": blobstore.enabled(),
+            "object_storage": objectstore.backend(),
             "user_accounts": user_count,
             "users_file_ok": not auth.users_file_error,
             "chat_model": config.GEMINI_CHAT_MODEL,

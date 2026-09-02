@@ -40,6 +40,19 @@ CREATE TABLE IF NOT EXISTS unanswered (
 );
 
 CREATE INDEX IF NOT EXISTS unanswered_asked_at_idx ON unanswered (asked_at DESC);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        text PRIMARY KEY,
+    value      text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app_files (
+    key        text PRIMARY KEY,
+    data       bytea NOT NULL,
+    size       bigint NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
 """
 
 

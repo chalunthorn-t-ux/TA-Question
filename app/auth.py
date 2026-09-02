@@ -22,7 +22,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from . import config, users_repo
+from . import config, settings_repo, users_repo
 
 log = logging.getLogger(__name__)
 
@@ -320,7 +320,10 @@ def authenticate(raw_username: str, password: str) -> User:
 # Session
 # --------------------------------------------------------------------------- #
 def has_session_secret() -> bool:
-    return bool(os.getenv("SESSION_SECRET", "").strip())
+    """มีคีย์ที่ "อยู่รอดข้าม cold start" ไหม — env หรือฐานข้อมูลก็ถือว่าใช้ได้"""
+    if os.getenv("SESSION_SECRET", "").strip():
+        return True
+    return bool(settings_repo.get(settings_repo.KEY_SESSION_SECRET))
 
 
 def session_secret() -> str:
@@ -330,6 +333,14 @@ def session_secret() -> str:
         return secret
 
     generated = secrets.token_urlsafe(48)
+
+    # ยังไม่ได้ตั้ง env แต่มีฐานข้อมูล -> เก็บคีย์ไว้ที่นั่น
+    # ทำให้ล็อกอินใช้งานได้โดยไม่ต้องไปตั้ง env บน Vercel เลย
+    # (ปัญหาเดิม: คีย์สุ่มใหม่ทุก cold start = คุกกี้ที่เพิ่งออกให้ใช้ไม่ได้)
+    if settings_repo.available():
+        return settings_repo.get_or_create(
+            settings_repo.KEY_SESSION_SECRET, lambda: generated
+        )
 
     # บน serverless เขียนไฟล์ไม่ได้ คีย์จะเปลี่ยนทุกครั้งที่ instance ตื่นขึ้นมาใหม่
     # ทำให้คุกกี้ที่เพิ่งออกให้ ใช้กับ request ถัดไปไม่ได้ = ล็อกอินไม่สำเร็จตลอด

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import blobstore, config
+from .. import config, objectstore
 from . import embedder, llm, redact
 from .chunker import chunk_sections
 from .loaders import RawSection, iter_documents, load_file
@@ -30,7 +30,7 @@ INDEX_FILES = ("index.json", "vectors.npy")
 # ไฟล์เดียวจะได้ของเก่าทั้งชุดหรือใหม่ทั้งชุดเท่านั้น ไม่มีทางปนกัน
 INDEX_BUNDLE = "index-bundle.npz"
 
-# บอกว่า index ที่โหลดอยู่มาจากไหน ("blob" / "disk" / "none") ใช้รายงานใน /healthz
+# บอกว่า index ที่โหลดอยู่มาจากไหน ("blob" / "postgres" / "disk" / "none")
 index_source: str = "none"
 
 
@@ -52,7 +52,7 @@ def _fetch_index_from_blob() -> Path | None:
     target.mkdir(parents=True, exist_ok=True)
 
     # fresh=True เพราะ index ที่เพิ่งอัปต้องเห็นทันที ไม่ใช่รอ CDN หมดอายุ
-    bundle = blobstore.get(INDEX_BUNDLE, fresh=True)
+    bundle = objectstore.get(INDEX_BUNDLE, fresh=True)
     if bundle is not None:
         with np.load(io.BytesIO(bundle), allow_pickle=False) as data:
             (target / "index.json").write_bytes(data["meta"].tobytes())
@@ -62,7 +62,7 @@ def _fetch_index_from_blob() -> Path | None:
     # index ที่ push ไว้ก่อนเปลี่ยนมาเก็บเป็นไฟล์เดียว — ยังอ่านได้
     log.info("ไม่พบ %s บน Blob ลองอ่านแบบไฟล์แยกของเดิม", INDEX_BUNDLE)
     for name in INDEX_FILES:
-        data = blobstore.get(name, fresh=True)
+        data = objectstore.get(name, fresh=True)
         if data is None:
             log.warning("ยังไม่มี %s บน Blob — ข้ามไปใช้ index ในดิสก์แทน", name)
             return None
@@ -79,11 +79,11 @@ def load_index() -> bool:
     """
     global index_source
 
-    if blobstore.enabled():
+    if objectstore.enabled():
         try:
             directory = _fetch_index_from_blob()
             if directory is not None and _store.load(directory):
-                index_source = "blob"
+                index_source = objectstore.backend()
                 return True
         except Exception as exc:  # noqa: BLE001
             # ดึงจาก Blob ไม่ได้ ไม่ควรทำให้แอปไม่ขึ้น — ถอยไปใช้ของในดิสก์
@@ -102,10 +102,10 @@ def load_index() -> bool:
 
 def push_index(directory: Path | None = None) -> list[dict]:
     """อัป index จากดิสก์ขึ้น Blob — ใช้หลัง ingest ในเครื่องเสร็จ (หรือหลัง ingest บน Vercel เอง)"""
-    if not blobstore.enabled():
+    if not objectstore.enabled():
         raise RuntimeError(
-            "ยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN — สร้าง Blob store ที่ Vercel "
-            "แล้วก็อปโทเคนมาใส่ .env ก่อนนะคะ"
+            "ยังไม่มีที่เก็บ index — ต้องตั้ง DATABASE_URL หรือ BLOB_READ_WRITE_TOKEN "
+            "อย่างน้อยหนึ่งอย่างก่อนนะคะ"
         )
 
     directory = directory or config.INDEX_DIR
@@ -126,7 +126,7 @@ def push_index(directory: Path | None = None) -> list[dict]:
     )
     data = buf.getvalue()
 
-    url = blobstore.put(INDEX_BUNDLE, data, "application/octet-stream")
+    url = objectstore.put(INDEX_BUNDLE, data, "application/octet-stream")
     return [{"name": INDEX_BUNDLE, "bytes": len(data), "url": url}]
 
 
@@ -139,7 +139,7 @@ def _fetch_docs_from_blob(target: Path) -> list[str]:
     ใช้ตอน ingest บน Vercel เอง — คนละที่จาก scripts/pull_docs.py แต่ตรรกะเดียวกัน
     """
     target.mkdir(parents=True, exist_ok=True)
-    items = [b for b in blobstore.list_keys(_DOCS_PREFIX) if b["key"] != _DOCS_PREFIX]
+    items = [b for b in objectstore.list_keys(_DOCS_PREFIX) if b["key"] != _DOCS_PREFIX]
 
     names: list[str] = []
     for item in items:
@@ -147,7 +147,7 @@ def _fetch_docs_from_blob(target: Path) -> list[str]:
         name = name.replace("\\", "/").split("/")[-1]     # กัน path traversal อีกชั้น
         if not name:
             continue
-        data = blobstore.get(item["key"])
+        data = objectstore.get(item["key"])
         if data is None:
             continue
         (target / name).write_bytes(data)
@@ -161,7 +161,7 @@ def _persist() -> str:
     """เซฟ index ที่อยู่ในหน่วยความจำลงที่เก็บถาวร คืนข้อความต่อท้ายให้ผู้ใช้อ่าน"""
     global index_source
 
-    if not (config.READ_ONLY_FS and blobstore.enabled()):
+    if not (config.READ_ONLY_FS and objectstore.enabled()):
         _store.save()
         index_source = "disk"
         return ""
@@ -172,7 +172,7 @@ def _persist() -> str:
         out_dir = _runtime_dir() / "index-out"
         _store.save(out_dir)
         push_index(out_dir)
-        index_source = "blob"
+        index_source = objectstore.backend()
         return " และอัปขึ้น Blob ให้ทุกคนใช้งานทันทีแล้วค่ะ"
     except Exception as exc:  # noqa: BLE001 — ให้รู้ผลก่อน ถึงจะ push ต่อไม่สำเร็จ
         log.error("push index ขึ้น Blob ไม่สำเร็จ: %s", exc)
@@ -212,10 +212,10 @@ def ingest(data_dir: Path | None = None, *, replace: bool = False) -> dict:
     """
     global index_source
 
-    use_blob = config.READ_ONLY_FS and blobstore.enabled()
+    use_remote = config.READ_ONLY_FS and objectstore.enabled()
 
     if data_dir is None:
-        if use_blob:
+        if use_remote:
             data_dir = _runtime_dir() / "docs-src"
             fetched = _fetch_docs_from_blob(data_dir)
             if not fetched:

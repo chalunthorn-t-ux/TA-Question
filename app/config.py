@@ -51,6 +51,7 @@ for _d in (DATA_DIR, INDEX_DIR):
         READ_ONLY_FS = True
 
 # ---- Gemini ----
+# ค่าที่ตั้งไว้ตอน import — ใช้ผ่าน gemini_api_key() เสมอ เพราะมีทางเลือกจากฐานข้อมูลด้วย
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_CHAT_MODEL = _str("GEMINI_CHAT_MODEL", "gemini-3.6-flash")
 GEMINI_EMBED_MODEL = _str("GEMINI_EMBED_MODEL", "gemini-embedding-001")
@@ -108,5 +109,20 @@ APP_SUBTITLE = _str("APP_SUBTITLE", "ผู้ช่วยตอบคำถา�
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt", ".md"}
 
 
+def gemini_api_key() -> str:
+    """คีย์ Gemini — env ชนะเสมอ ถ้าไม่ได้ตั้งค่อยดูค่าที่บันทึกไว้ในฐานข้อมูล
+
+    มีทางที่สองเพราะการตั้ง env บน Vercel ต้อง redeploy และแก้ทีหลังไม่สะดวก
+    ส่วนค่าในฐานข้อมูลตั้งได้จากหน้า /admin/settings แล้วมีผลทันที
+    """
+    if GEMINI_API_KEY:
+        return GEMINI_API_KEY
+
+    # import ที่นี่เพื่อไม่ให้ config ต้องพึ่งฐานข้อมูลตอน import
+    from . import settings_repo
+
+    return settings_repo.get(settings_repo.KEY_GEMINI_API_KEY)
+
+
 def has_api_key() -> bool:
-    return bool(GEMINI_API_KEY)
+    return bool(gemini_api_key())

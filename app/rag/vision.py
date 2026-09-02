@@ -94,7 +94,7 @@ def _call_gemini(data: bytes, mime: str) -> str:
         resp = client.post(
             url,
             headers={
-                "x-goog-api-key": config.GEMINI_API_KEY,
+                "x-goog-api-key": config.gemini_api_key(),
                 "Content-Type": "application/json",
             },
             json=payload,

@@ -67,6 +67,12 @@ Vercel → **Storage** → **Blob** → Create → Connect to project (ได้
 
 ### 2. ตั้ง environment variable ที่ Vercel
 
+> 💡 **จำเป็นจริง ๆ แค่ `DATABASE_URL` ตัวเดียว** — ที่เหลือตั้งจากหน้าเว็บได้
+> ถ้ามีฐานข้อมูล ระบบจะสร้างคีย์เซ็นคุกกี้เก็บไว้เอง เก็บ index ลง Postgres แทน Blob
+> และรับ Gemini API key จากหน้า `/admin/settings` ได้โดยไม่ต้อง deploy ใหม่
+> ตั้ง env ยังเร็วกว่าและเหมาะกับ production แต่ไม่ใช่เงื่อนไขบังคับอีกต่อไป
+
+
 | ตัวแปร | จำเป็น | หมายเหตุ |
 |---|---|---|
 | `GEMINI_API_KEY` | ✅ | ไม่มีก็ตอบคำถามไม่ได้ |
@@ -199,6 +205,7 @@ loader จะจับคู่ให้ 1 แถว = 1 chunk ทำให้�
 | `GET` | `/api/status` | จำนวน chunk, เอกสาร, โมเดล, เวลาสร้าง index |
 | `POST` | `/api/ask` | `{question, history[], top_k?}` → `{answer, sources[], status}` |
 | `POST` | `/api/ingest` | เพิ่มเอกสารใหม่เข้า index (`?replace=1` = ล้างแล้วสร้างใหม่ทั้งหมด) |
+| `GET` | `/admin/settings` | ตั้งค่าระบบจากหน้าเว็บ (admin) |
 | `POST` | `/api/sources/remove` | เอาเอกสารหนึ่งไฟล์ออกจาก index (admin) |
 | `POST` | `/api/upload` | อัปโหลดไฟล์เข้า `data/` (multipart) |
 | `GET` | `/api/gaps` | คำถามที่ระบบตอบไม่ได้ (admin) |
@@ -219,7 +226,7 @@ loader จะจับคู่ให้ 1 แถว = 1 chunk ทำให้�
 | `TOP_K` | `5` | จำนวน chunk ที่ส่งให้ LLM |
 | `MIN_SCORE` | `0.15` | คะแนนต่ำสุดที่ถือว่าเกี่ยวข้อง |
 | `HYBRID_ALPHA` | `0.7` | น้ำหนัก semantic ต่อ keyword |
-| `DATABASE_URL` | (ว่าง) | Postgres สำหรับบัญชีผู้ใช้ — ว่าง = ใช้ `storage/users.json` |
+| `DATABASE_URL` | (ว่าง) | Postgres — บัญชีผู้ใช้ ค่าตั้งระบบ และ index (ถ้าไม่มี Blob) |
 | `BLOB_READ_WRITE_TOKEN` | (ว่าง) | Vercel Blob สำหรับ index — ว่าง = ใช้ `storage/` ในดิสก์ |
 | `INDEX_BLOB_PREFIX` | (ว่าง) | โฟลเดอร์นำหน้าใน Blob — ต้องตรงกันทั้งฝั่ง push และฝั่งเว็บ |
 | `BLOB_ACCESS` | `private` | โหมดของ blob store ต้องตรงกับที่เลือกตอนสร้าง |
@@ -276,8 +283,9 @@ PDF ที่สร้างจาก Word มักทำ **สระอำแ�
 | อัปไฟล์ใหม่แล้วเอกสารเก่าหาย | เกิดกับเวอร์ชันเก่าที่ ingest สร้างทับทั้งก้อน — ตอนนี้เป็นแบบเพิ่มเข้าไปแล้ว กู้ของเก่าด้วย `python scripts/restore_index.py --apply` |
 | ค้นไม่เจอทั้งที่มีข้อมูล | ลดค่า `MIN_SCORE` หรือลด `HYBRID_ALPHA` เป็น `0.5` เพื่อให้ keyword มีน้ำหนักขึ้น |
 | PDF อ่านได้ 0 ส่วน | เป็น PDF สแกน ต้อง OCR ก่อน (เช่นด้วย `ocrmypdf`) |
-| ล็อกอินแล้วเด้งกลับหน้า login ทุกครั้ง (บน Vercel) | ยังไม่ได้ตั้ง `SESSION_SECRET` เป็นค่าคงที่ |
+| ล็อกอินแล้วเด้งกลับหน้า login ทุกครั้ง (บน Vercel) | ยังไม่ได้ตั้ง `SESSION_SECRET` และยังไม่มี `DATABASE_URL` ให้เก็บคีย์แทน |
 | สมัครสมาชิกไม่ได้ บอกว่าเซิร์ฟเวอร์เขียนไฟล์ไม่ได้ | ยังไม่ได้ตั้ง `DATABASE_URL` |
+| ตอบว่ายังไม่ได้ตั้ง Gemini API key | ใส่คีย์ที่ `/admin/settings` ได้เลย ไม่ต้องแตะ env |
 | push index แล้วเว็บยังตอบด้วยของเก่า | instance เดิมยังอุ่นอยู่ รอ cold start หรือ redeploy — เช็ค `/healthz` → `index_source` |
 
 ---

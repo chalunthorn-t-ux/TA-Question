@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ตั้งค่าระบบ · {{ title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🍞</text></svg>" />
+</head>
+<body class="admin-body">
+
+<main class="admin">
+
+  <header class="admin__head">
+    <div>
+      <h1>ตั้งค่าระบบ</h1>
+      <p>ตั้งค่าที่นี่มีผลทันที ไม่ต้อง deploy ใหม่ — เก็บไว้ในฐานข้อมูล</p>
+    </div>
+    <a href="/" class="btn btn--ghost btn--ghost-dark">← กลับหน้าถาม-ตอบ</a>
+  </header>
+
+  {% if flash %}
+  <div class="admin__flash admin__flash--{{ flash.kind }}">
+    {{ '✅' if flash.kind == 'ok' else '⚠️' }} {{ flash.message }}
+  </div>
+  {% endif %}
+
+  {% if not db_ready %}
+  <div class="admin__flash admin__flash--error">
+    ⚠️ ยังไม่ได้ตั้ง <code>DATABASE_URL</code> จึงบันทึกค่าจากหน้านี้ไม่ได้<br />
+    ต้องผูกฐานข้อมูล Postgres เข้ากับโปรเจกต์ก่อน
+  </div>
+  {% endif %}
+
+  <section class="card">
+    <h2 class="card__title">สถานะระบบ</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>รายการ</th><th>สถานะ</th><th>มาจาก</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>บัญชีผู้ใช้</td>
+            <td>{{ '✅ พร้อม' if user_storage == 'postgres' else '⚠️ ไฟล์ JSON' }}</td>
+            <td class="muted">{{ user_storage }}</td>
+          </tr>
+          <tr>
+            <td>ที่เก็บความรู้</td>
+            <td>{{ '✅ พร้อม' if object_storage != 'none' else '❌ ยังไม่มี' }}</td>
+            <td class="muted">{{ object_storage }}</td>
+          </tr>
+          <tr>
+            <td>คีย์เซ็นคุกกี้ (ล็อกอิน)</td>
+            <td>{{ '✅ พร้อม' if has_session_secret else '❌ ยังไม่มี' }}</td>
+            <td class="muted">{{ session_secret_from }}</td>
+          </tr>
+          <tr>
+            <td>Gemini API key</td>
+            <td>{{ '✅ พร้อม' if has_api_key else '❌ ยังไม่มี — ตอบคำถามไม่ได้' }}</td>
+            <td class="muted">{{ api_key_from }}</td>
+          </tr>
+          <tr>
+            <td>ความรู้ใน index</td>
+            <td>{{ chunk_count }} chunk · {{ document_count }} เอกสาร</td>
+            <td class="muted">{{ index_source }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Gemini API key</h2>
+    <p class="muted">
+      ขอคีย์ได้ที่ <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>
+      — ใส่แล้วกดบันทึก ระบบจะตอบคำถามได้ทันทีโดยไม่ต้อง deploy ใหม่
+      {% if api_key_from == 'environment' %}
+      <br />⚠️ ตอนนี้มีคีย์จาก environment variable อยู่แล้ว ซึ่งจะถูกใช้ก่อนค่าที่บันทึกที่นี่เสมอ
+      {% endif %}
+    </p>
+    <form method="post" action="/admin/settings/api-key" class="stack">
+      <label>
+        คีย์ใหม่
+        <input type="password" name="api_key" required minlength="20" maxlength="200"
+               autocomplete="off" placeholder="AIza..." {{ 'disabled' if not db_ready }} />
+      </label>
+      <button type="submit" class="btn" {{ 'disabled' if not db_ready }}>บันทึกคีย์</button>
+    </form>
+  </section>
+
+  <nav class="admin__foot">
+    <a href="/admin/users" class="btn btn--ghost btn--ghost-dark">จัดการสมาชิก →</a>
+  </nav>
+
+</main>
+</body>
+</html>

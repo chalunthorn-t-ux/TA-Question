@@ -60,7 +60,7 @@ def _gemini_embed(texts: list[str], task_type: str) -> np.ndarray:
         ":batchEmbedContents"
     )
     headers = {
-        "x-goog-api-key": config.GEMINI_API_KEY,
+        "x-goog-api-key": config.gemini_api_key(),
         "Content-Type": "application/json",
     }
 

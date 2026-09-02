@@ -132,7 +132,7 @@ def _post_with_retry(url: str, payload: dict, deadline: float | None = None) -> 
     การยอมแพ้ก่อนแล้วคืนข้อความจากเอกสารให้อ่าน มีประโยชน์กว่ามาก
     """
     headers = {
-        "x-goog-api-key": config.GEMINI_API_KEY,
+        "x-goog-api-key": config.gemini_api_key(),
         "Content-Type": "application/json",
     }
     last_detail = "เรียก Gemini ไม่สำเร็จ"
