@@ -14,6 +14,10 @@ import logging
 import os
 from contextlib import contextmanager
 
+# import config เพื่อให้ .env ถูกโหลดก่อนอ่าน env var
+# (โมดูลนี้ถูก import ตรง ๆ ได้จากสคริปต์ ซึ่งอาจไม่ได้แตะ config เลย)
+from . import config  # noqa: F401
+
 log = logging.getLogger(__name__)
 
 # Vercel/Neon integration ฉีดตัวแปรมาหลายชื่อ รับไว้ทุกแบบเพื่อไม่ต้องมานั่งตั้งซ้ำ

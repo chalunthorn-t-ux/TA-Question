@@ -19,6 +19,10 @@ import time
 
 import httpx
 
+# import config เพื่อให้ .env ถูกโหลดก่อนอ่าน env var
+# (โมดูลนี้ถูก import ตรง ๆ ได้จากสคริปต์ ซึ่งอาจไม่ได้แตะ config เลย)
+from . import config  # noqa: F401
+
 log = logging.getLogger(__name__)
 
 _API = "https://blob.vercel-storage.com"
