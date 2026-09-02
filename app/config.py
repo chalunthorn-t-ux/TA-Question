@@ -90,8 +90,14 @@ HYBRID_ALPHA = _float("HYBRID_ALPHA", 0.7)
 # ---- Session / ความปลอดภัย ----
 # อายุคุกกี้ล็อกอิน (วินาที) ค่าเริ่มต้น 7 วัน
 SESSION_MAX_AGE = _int("SESSION_MAX_AGE", 7 * 24 * 3600)
-# ตั้งเป็น 1 เมื่อ deploy บน https (Vercel) เพื่อไม่ให้คุกกี้ส่งผ่าน http
-SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "").strip() in ("1", "true", "yes")
+# ไม่ให้คุกกี้ล็อกอินส่งผ่าน http
+# ไม่ได้ตั้งไว้ -> เดาจากสภาพแวดล้อม: เขียนดิสก์ไม่ได้ = serverless = อยู่บน https อยู่แล้ว
+# (ตั้งเป็น 0 บังคับปิดได้ ถ้ารัน serverless หลัง proxy ที่เป็น http จริง ๆ)
+_https_only_raw = os.getenv("SESSION_HTTPS_ONLY", "").strip().lower()
+if _https_only_raw:
+    SESSION_HTTPS_ONLY = _https_only_raw in ("1", "true", "yes")
+else:
+    SESSION_HTTPS_ONLY = READ_ONLY_FS
 
 # หน้า /docs /redoc เปิดดูได้โดยไม่ต้องล็อกอิน จึงปิดไว้เป็นค่าเริ่มต้น
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip() in ("1", "true", "yes")
