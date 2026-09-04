@@ -647,7 +647,7 @@ async def users_delete(
 @app.post("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
 
 # --------------------------------------------------------------------------- #

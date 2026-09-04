@@ -108,7 +108,7 @@ ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip() in ("1", "true", "yes")
 # เปิดด้วย SHOW_SOURCES=1 เวลาต้องการตรวจว่าระบบดึงข้อมูลจากที่ไหน
 SHOW_SOURCES = _str("SHOW_SOURCES", "0") in ("1", "true", "yes")
 
-APP_TITLE = _str("APP_TITLE", "TA Assistant")
+APP_TITLE = _str("APP_TITLE", "น้อง ปังปัง 🍞")
 APP_SUBTITLE = _str("APP_SUBTITLE", "ผู้ช่วยตอบคำถามสำหรับ TA (Training Assistant) ใหม่")
 
 # ไฟล์ที่รองรับ
