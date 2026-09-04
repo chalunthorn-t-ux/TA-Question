@@ -1,0 +1,49 @@
+{
+  "_readme": [
+    "ชุดคำถามสำหรับประเมินระบบ — ใช้กับ scripts/evaluate.py",
+    "",
+    "expect_source = ชื่อไฟล์เอกสารที่ 'ควร' ถูกค้นเจอ (ตรวจว่าระบบดึงถูกที่หรือไม่)",
+    "expect_source = null คือคำถามนอกขอบเขต ระบบ 'ควรตอบไม่ได้' ไม่ใช่เดาไปเรื่อย",
+    "",
+    "⚠️ ก่อนใช้ในรายงาน ให้คนที่รู้งาน TA จริงตรวจ expect_source ทุกข้อก่อน",
+    "   เพราะเป็นเฉลยที่ใช้ตัดสินว่าระบบถูกหรือผิด ถ้าเฉลยผิด ตัวเลขก็ไม่มีความหมาย",
+    "   (ตอนร่างชุดนี้เคยตั้ง 'ที่จอดรถ' เป็นคำถามนอกขอบเขต ทั้งที่มีอยู่ใน knowledge.pdf",
+    "    หน้า 6 จริง ๆ ระบบตอบถูกแต่ถูกนับว่าผิด — เป็นตัวอย่างว่าเฉลยผิดแล้วผลเพี้ยนอย่างไร)"
+  ],
+
+  "questions": [
+    {"id": "Q01", "question": "9Expert มีการอบรมทั้งหมดกี่ประเภท อะไรบ้าง", "expect_source": "knowledge.pdf", "topic": "ประเภทการอบรม"},
+    {"id": "Q02", "question": "Public Training คืออะไร แบ่งเป็นกี่รูปแบบ", "expect_source": "knowledge.pdf", "topic": "ประเภทการอบรม"},
+    {"id": "Q03", "question": "Hybrid Class คืออะไร", "expect_source": "knowledge.pdf", "topic": "ประเภทการอบรม"},
+    {"id": "Q04", "question": "เรียนออนไลน์มีกี่รูปแบบ ต่างกันอย่างไร", "expect_source": "knowledge.pdf", "topic": "เรียนออนไลน์"},
+    {"id": "Q05", "question": "E-Learning แบบดูย้อนหลัง เรียนซ้ำได้ภายในกี่วัน", "expect_source": "knowledge.pdf", "topic": "เรียนออนไลน์"},
+    {"id": "Q06", "question": "ดูอย่างไรว่าคลาสไหนมี Live ให้เลือก", "expect_source": "knowledge.pdf", "topic": "เรียนออนไลน์"},
+    {"id": "Q07", "question": "มีคลาสเรียนวันเสาร์-อาทิตย์ หรือหลังเลิกงานไหม", "expect_source": "knowledge.pdf", "topic": "ตารางอบรม"},
+    {"id": "Q08", "question": "มาเรียนที่ 9Expert ต้องเตรียมอะไรบ้าง มีอาหารให้ไหม", "expect_source": "knowledge.pdf", "topic": "การเตรียมตัว"},
+    {"id": "Q09", "question": "นำคอมพิวเตอร์ส่วนตัวมาใช้อบรมได้ไหม", "expect_source": "knowledge.pdf", "topic": "การเตรียมตัว"},
+    {"id": "Q10", "question": "ยื่นขอลดหย่อนภาษี 200% จากค่าอบรมได้หรือไม่", "expect_source": "knowledge.pdf", "topic": "ค่าใช้จ่าย"},
+    {"id": "Q11", "question": "In-house Training เริ่มต้นขั้นต่ำกี่ท่านต่อรุ่น", "expect_source": "knowledge.pdf", "topic": "In-house"},
+    {"id": "Q12", "question": "สิทธิ์เรียนซ้ำคืออะไร มีเงื่อนไขอย่างไร", "expect_source": "knowledge.pdf", "topic": "เรียนซ้ำ"},
+    {"id": "Q13", "question": "ใช้สิทธิ์เรียนซ้ำต้องเตรียมคอมพิวเตอร์และเอกสารเองไหม", "expect_source": "knowledge.pdf", "topic": "เรียนซ้ำ"},
+
+    {"id": "Q14", "question": "เกณฑ์การได้รับ Certificate มีอะไรบ้าง", "expect_source": "เกณฑ์การได้รับ Certificate.docx", "topic": "วุฒิบัตร"},
+    {"id": "Q15", "question": "ต้องทำ Workshop ให้ได้กี่เปอร์เซ็นต์ถึงจะได้วุฒิบัตร", "expect_source": "เกณฑ์การได้รับ Certificate.docx", "topic": "วุฒิบัตร"},
+
+    {"id": "Q16", "question": "อบรม 3 วัน ต้องเข้าเรียนขั้นต่ำกี่ชั่วโมง", "expect_source": "เงื่อนไขคำนวณเวลาอบรม.docx", "topic": "คำนวณเวลา"},
+    {"id": "Q17", "question": "อบรม 2 วัน ขาดได้ไม่เกินกี่ชั่วโมง", "expect_source": "เงื่อนไขคำนวณเวลาอบรม.docx", "topic": "คำนวณเวลา"},
+    {"id": "Q18", "question": "ตารางคำนวณเวลาอบรมขั้นต่ำ 80% เป็นอย่างไร", "expect_source": "เงื่อนไขคำนวณเวลาอบรม.docx", "topic": "คำนวณเวลา"},
+
+    {"id": "Q19", "question": "แบบประเมิน Evaluation ต้องให้ผู้เข้าอบรมทำเมื่อไหร่", "expect_source": "เงื่อนไขการทำงานของ TA ค่ะ.docx", "topic": "งาน TA"},
+    {"id": "Q20", "question": "เงื่อนไขการทำงานของ TA มีอะไรบ้าง", "expect_source": "เงื่อนไขการทำงานของ TA ค่ะ.docx", "topic": "งาน TA"},
+
+    {"id": "Q21", "question": "การสรุปวุฒิบัตรสำหรับ In-house Training ต้องทำอย่างไร", "expect_source": "ตัวอย่างการสรุปวุฒิบัตร สำหรับ In house Training ต้องสรุปละเอียดเนื่องจากต้องนำข้อมูลประกอบการรายงานส่ง Customer Report.docx", "topic": "In-house"},
+    {"id": "Q22", "question": "ถ้าผู้เข้าอบรมเข้าร่วมไม่ครบ 80% ต้องทำอย่างไร", "expect_source": "ตัวอย่างการสรุปวุฒิบัตร สำหรับ In house Training ต้องสรุปละเอียดเนื่องจากต้องนำข้อมูลประกอบการรายงานส่ง Customer Report.docx", "topic": "วุฒิบัตร"},
+
+    {"id": "Q23", "question": "ที่ 9Expert มี Wi-Fi และที่จอดรถให้ผู้เข้าอบรมไหม", "expect_source": "knowledge.pdf", "topic": "การเตรียมตัว"},
+
+    {"id": "N01", "question": "ค่าอบรมหลักสูตร Excel ขั้นสูงราคาเท่าไหร่", "expect_source": null, "topic": "นอกขอบเขต"},
+    {"id": "N02", "question": "เมืองหลวงของประเทศญี่ปุ่นคือเมืองอะไร", "expect_source": null, "topic": "นอกขอบเขต"},
+    {"id": "N03", "question": "วิทยากรที่สอนหลักสูตร Power BI ชื่ออะไร", "expect_source": null, "topic": "นอกขอบเขต"},
+    {"id": "N04", "question": "สถาบัน 9Expert ก่อตั้งขึ้นเมื่อปีใด", "expect_source": null, "topic": "นอกขอบเขต"}
+  ]
+}

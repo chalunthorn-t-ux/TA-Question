@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 640" width="900" height="640" font-family="Sarabun, 'TH Sarabun New', Tahoma, sans-serif">
+  <style>
+    .box  { fill:#ffffff; stroke:#334155; stroke-width:1.4; rx:7; }
+    .acc  { fill:#f1f5f9; stroke:#334155; stroke-width:1.4; rx:7; }
+    .zone { fill:#f8fafc; stroke:#94a3b8; stroke-width:1.2; stroke-dasharray:6 4; rx:10; }
+    .tb   { font-size:13px; fill:#0f172a; font-weight:700; }
+    .ts   { font-size:10.5px; fill:#475569; }
+    .zt   { font-size:12px; fill:#0f172a; font-weight:700; }
+    .zs   { font-size:10.5px; fill:#64748b; }
+    .ar   { stroke:#334155; stroke-width:1.5; fill:none; marker-end:url(#a); }
+    .lb   { font-size:10px; fill:#475569; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="26" class="tb" font-size="16" text-anchor="middle">ขั้นตอนการทำงานของระบบ (RAG)</text>
+
+  <!-- ══ กระบวนการที่ 1: สร้างคลังความรู้ ══ -->
+  <rect x="24" y="46" width="852" height="248" class="zone"/>
+  <text x="42" y="70" class="zt">กระบวนการที่ 1 — สร้างคลังความรู้ (Indexing)</text>
+  <text x="42" y="88" class="zs">ทำเมื่อมีเอกสารใหม่หรือมีการแก้ไข · ผู้ดูแลระบบสั่งจากหน้าเว็บ</text>
+
+  <rect x="42" y="104" width="128" height="66" class="box"/>
+  <text x="106" y="130" class="tb" text-anchor="middle">เอกสารต้นฉบับ</text>
+  <text x="106" y="148" class="ts" text-anchor="middle">PDF · Word · Excel</text>
+  <text x="106" y="163" class="ts" text-anchor="middle">CSV · Markdown</text>
+
+  <rect x="196" y="104" width="122" height="66" class="box"/>
+  <text x="257" y="130" class="tb" text-anchor="middle">อ่านเนื้อหา</text>
+  <text x="257" y="148" class="ts" text-anchor="middle">แยกข้อความตาม</text>
+  <text x="257" y="163" class="ts" text-anchor="middle">หน้า/ชีต/ตาราง</text>
+
+  <rect x="344" y="104" width="122" height="66" class="acc"/>
+  <text x="405" y="130" class="tb" text-anchor="middle">ลบชื่อบุคคล</text>
+  <text x="405" y="148" class="ts" text-anchor="middle">ปกป้องข้อมูล</text>
+  <text x="405" y="163" class="ts" text-anchor="middle">ผู้เข้าอบรม</text>
+
+  <rect x="492" y="104" width="122" height="66" class="box"/>
+  <text x="553" y="130" class="tb" text-anchor="middle">ตัดเป็นช่วง</text>
+  <text x="553" y="148" class="ts" text-anchor="middle">ช่วงละ 900 ตัวอักษร</text>
+  <text x="553" y="163" class="ts" text-anchor="middle">คาบเกี่ยวกัน 150</text>
+
+  <rect x="640" y="104" width="122" height="66" class="box"/>
+  <text x="701" y="130" class="tb" text-anchor="middle">สร้างเวกเตอร์</text>
+  <text x="701" y="148" class="ts" text-anchor="middle">Gemini Embedding</text>
+  <text x="701" y="163" class="ts" text-anchor="middle">768 มิติ</text>
+
+  <rect x="640" y="200" width="122" height="66" class="box"/>
+  <text x="701" y="226" class="tb" text-anchor="middle">เก็บ index</text>
+  <text x="701" y="244" class="ts" text-anchor="middle">ข้อความ + เวกเตอร์</text>
+  <text x="701" y="259" class="ts" text-anchor="middle">+ ที่มาของข้อมูล</text>
+
+  <path d="M170,137 L194,137" class="ar"/>
+  <path d="M318,137 L342,137" class="ar"/>
+  <path d="M466,137 L490,137" class="ar"/>
+  <path d="M614,137 L638,137" class="ar"/>
+  <path d="M701,170 L701,198" class="ar"/>
+
+  <!-- ══ กระบวนการที่ 2: ตอบคำถาม ══ -->
+  <rect x="24" y="312" width="852" height="272" class="zone"/>
+  <text x="42" y="336" class="zt">กระบวนการที่ 2 — ตอบคำถาม (Retrieval &amp; Generation)</text>
+  <text x="42" y="354" class="zs">ทำทุกครั้งที่มีผู้ใช้ถาม · ใช้เวลาประมาณ 3-10 วินาที</text>
+
+  <rect x="42" y="372" width="128" height="62" class="box"/>
+  <text x="106" y="398" class="tb" text-anchor="middle">คำถามจากผู้ใช้</text>
+  <text x="106" y="418" class="ts" text-anchor="middle">พร้อมประวัติการสนทนา</text>
+
+  <rect x="196" y="372" width="122" height="62" class="box"/>
+  <text x="257" y="398" class="tb" text-anchor="middle">สร้างเวกเตอร์</text>
+  <text x="257" y="418" class="ts" text-anchor="middle">ของคำถาม</text>
+
+  <rect x="344" y="360" width="176" height="86" class="acc"/>
+  <text x="432" y="384" class="tb" text-anchor="middle">ค้นหาแบบผสม</text>
+  <text x="432" y="404" class="ts" text-anchor="middle">ความหมาย 70% (cosine)</text>
+  <text x="432" y="420" class="ts" text-anchor="middle">+ คำสำคัญ 30% (TF-IDF)</text>
+  <text x="432" y="437" class="ts" text-anchor="middle">เลือก 5 ช่วงที่ตรงที่สุด</text>
+
+  <rect x="546" y="372" width="140" height="62" class="box"/>
+  <text x="616" y="398" class="tb" text-anchor="middle">ประกอบ Prompt</text>
+  <text x="616" y="418" class="ts" text-anchor="middle">คำถาม + เนื้อหาที่ค้นได้</text>
+
+  <rect x="712" y="360" width="146" height="86" class="box"/>
+  <text x="785" y="384" class="tb" text-anchor="middle">Gemini สรุปคำตอบ</text>
+  <text x="785" y="404" class="ts" text-anchor="middle">ตอบจากเนื้อหาที่ให้</text>
+  <text x="785" y="420" class="ts" text-anchor="middle">เท่านั้น ห้ามเดาเอง</text>
+  <text x="785" y="437" class="ts" text-anchor="middle">ไม่มีข้อมูล = บอกไม่รู้</text>
+
+  <path d="M170,403 L194,403" class="ar"/>
+  <path d="M318,403 L342,403" class="ar"/>
+  <path d="M520,403 L544,403" class="ar"/>
+  <path d="M686,403 L710,403" class="ar"/>
+
+  <path d="M701,266 L701,300 L432,300 L432,358" class="ar"/>
+  <text x="560" y="294" class="lb" text-anchor="middle">ค้นจาก index ที่สร้างไว้</text>
+
+  <rect x="546" y="490" width="312" height="62" class="box"/>
+  <text x="702" y="516" class="tb" text-anchor="middle">คำตอบพร้อมแหล่งอ้างอิง</text>
+  <text x="702" y="536" class="ts" text-anchor="middle">ส่งกลับไปแสดงบนหน้าเว็บ · บันทึกคำถามที่ตอบไม่ได้ไว้วิเคราะห์</text>
+
+  <path d="M785,446 L785,488" class="ar"/>
+
+  <text x="450" y="608" class="ts" text-anchor="middle">
+    หลักการสำคัญ: โมเดลภาษาไม่ได้ถูกฝึกด้วยเอกสารของสถาบัน แต่ได้รับเนื้อหาที่ค้นเจอแนบไปกับคำถามทุกครั้ง
+  </text>
+  <text x="450" y="626" class="ts" text-anchor="middle">
+    คำตอบจึงอ้างอิงเอกสารจริงและตรวจสอบย้อนกลับได้ ทั้งยังแก้ไขความรู้ได้โดยไม่ต้องฝึกโมเดลใหม่
+  </text>
+</svg>
