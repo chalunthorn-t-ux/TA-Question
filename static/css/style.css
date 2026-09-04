@@ -566,7 +566,8 @@ body {
   border-color: var(--primary);
   box-shadow: 0 0 0 3.5px var(--primary-faint);
 }
-.field input:invalid:not(:placeholder-shown):not(:focus) { border-color: var(--danger); }
+/* ช่องเลือกไฟล์ไม่มี placeholder จึงเข้าเงื่อนไขนี้ตลอดและขึ้นกรอบแดงตั้งแต่ยังไม่ได้แตะ */
+.field input:invalid:not([type="file"]):not(:placeholder-shown):not(:focus) { border-color: var(--danger); }
 
 .btn--block { width: 100%; margin-top: 4px; padding: 13px; }
 
@@ -754,11 +755,18 @@ body {
   cursor: pointer;
   transition: background .15s, border-color .15s, color .15s;
 }
+/* ใช้กับ <a> ด้วย (ปุ่มดาวน์โหลด) ซึ่งเป็น inline และมีเส้นใต้มาตามค่าเริ่มต้นของลิงก์ */
+a.mini-btn { display: inline-block; text-decoration: none; }
 .mini-btn:hover { background: var(--primary-faint); border-color: var(--primary); }
 .mini-btn--danger { color: var(--danger); }
 .mini-btn--danger:hover { background: rgba(179, 64, 47, .09); border-color: var(--danger); }
 
 .admin__foot { font-size: 11.5px; color: var(--ink-faint); text-align: center; margin-top: 4px; }
+/* ท้ายหน้าที่เป็นแถวลิงก์ไปหน้าอื่น — ต้องเว้นช่องไฟระหว่างปุ่ม */
+nav.admin__foot { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* ช่องเลือกไฟล์ — .field input ตั้งมาเพื่อช่องข้อความ ปุ่ม Browse จึงอัดจนแน่น */
+.field input[type="file"] { padding: 9px 11px; font-size: 12px; cursor: pointer; }
 
 /* ── ลิงก์ไปหน้าจัดการสมาชิก ใน sidebar ── */
 .side-link {

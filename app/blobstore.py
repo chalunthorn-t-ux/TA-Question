@@ -111,6 +111,7 @@ def list_keys(subprefix: str = "") -> list[dict]:
                     "key": pathname[len(prefix()):],
                     "pathname": pathname,
                     "size": blob.get("size", 0),
+                    "modified": blob.get("uploadedAt", ""),
                     "url": blob.get("downloadUrl") or blob.get("url", ""),
                 }
             )
@@ -177,6 +178,8 @@ def delete(key: str) -> None:
     url = _url_for(key)
     if not url:
         return
+    # ลืม URL ที่จำไว้ ไม่งั้นอัปไฟล์ชื่อเดิมใหม่แล้วยังอ่านของที่ลบไปแล้วอยู่
+    _url_cache.pop(f"{prefix()}{key}", None)
     httpx.post(
         f"{_API}/delete",
         json={"urls": [url]},

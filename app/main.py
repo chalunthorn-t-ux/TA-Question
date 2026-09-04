@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import time
 from contextlib import asynccontextmanager
 from functools import partial
+from urllib.parse import quote
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
-from . import auth, config, db, gaps, objectstore, settings_repo
+from . import auth, config, db, docstore, gaps, objectstore, settings_repo
 from .rag import pipeline
 
 logging.basicConfig(
@@ -336,6 +336,231 @@ async def settings_api_key(
     return RedirectResponse("/admin/settings", status_code=HTTP_303_SEE_OTHER)
 
 
+# --------------------------------------------------------------------------- #
+# คลังความรู้ — จัดการไฟล์เอกสารต้นฉบับจากหน้าเว็บ
+# --------------------------------------------------------------------------- #
+def _size_text(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / 1024 / 1024:.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size} B"
+
+
+@app.get("/admin/knowledge")
+async def knowledge_page(request: Request, user: auth.User = Depends(require_admin)):
+    """จัดการไฟล์ความรู้ — เพิ่ม แทนที่ ดาวน์โหลดไปแก้ และลบ
+
+    หน้าถาม-ตอบอัปโหลดไฟล์ได้อย่างเดียว พอเอกสารมีแก้ไข (ซึ่งมีแน่)
+    จึงไม่มีทางเอาของเก่าออก หรือเช็คว่าตอนนี้ในคลังมีไฟล์อะไรอยู่บ้าง
+    """
+    store = pipeline.get_store()
+    indexed = {s["name"]: s["chunks"] for s in store.sources()}
+
+    files: list[dict] = []
+    try:
+        raw = await run_in_threadpool(docstore.list_documents)
+    except Exception as exc:  # noqa: BLE001 — ที่เก็บล่มไม่ควรทำให้หน้าเปิดไม่ขึ้น
+        raw = []
+        log.error("อ่านรายชื่อเอกสารไม่สำเร็จ: %s", exc)
+        _flash(request, f"อ่านรายชื่อเอกสารจากที่เก็บไม่สำเร็จ: {exc}", "error")
+
+    for item in raw:
+        files.append(
+            {
+                "name": item["name"],
+                "size_text": _size_text(item["size"]),
+                "modified": (item.get("modified") or "")[:16].replace("T", " "),
+                "chunks": indexed.pop(item["name"], 0),
+            }
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="knowledge.html",
+        context={
+            "title": config.APP_TITLE,
+            "user": user,
+            "flash": _take_flash(request),
+            "files": files,
+            # เอกสารที่ยังอยู่ใน index แต่ไม่มีไฟล์ต้นฉบับให้แก้แล้ว
+            # (ลบไฟล์ตรงที่เก็บไปแล้ว หรือ index มาจากรอบที่ ingest ในเครื่อง)
+            "orphans": [{"name": n, "chunks": c} for n, c in sorted(indexed.items())],
+            "storage": docstore.backend(),
+            "writable": docstore.writable(),
+            "extensions": ", ".join(sorted(config.SUPPORTED_EXTENSIONS)),
+            "chunk_count": len(store.chunks),
+            "index_source": pipeline.index_source,
+            "built_at": store.built_at,
+        },
+    )
+
+
+@app.post("/admin/knowledge/upload")
+async def knowledge_upload(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    user: auth.User = Depends(require_admin),
+):
+    """เพิ่มหรือแทนที่เอกสาร — ชื่อซ้ำคือการอัปเดตทับ ซึ่งเป็นวิธีแก้ไขเอกสาร"""
+    saved, replaced, rejected = [], [], []
+
+    # ถามรายชื่อเดิมทีเดียว — บน Blob การเช็คทีละไฟล์คือ list ทั้งโฟลเดอร์ทุกครั้ง
+    try:
+        existing = await run_in_threadpool(docstore.names)
+    except Exception as exc:  # noqa: BLE001 — แค่ทำให้บอกไม่ได้ว่า "ทับของเดิม" ไม่ใช่เรื่องคอขาดบาดตาย
+        log.warning("อ่านรายชื่อเอกสารเดิมไม่สำเร็จ: %s", exc)
+        existing = set()
+
+    for upload in files:
+        try:
+            name = docstore.safe_name(upload.filename or "")
+            docstore.check_supported(name)
+            data = await run_in_threadpool(upload.file.read)
+            existed = name in existing
+            await run_in_threadpool(
+                docstore.save, name, data,
+                upload.content_type or "application/octet-stream",
+            )
+            (replaced if existed else saved).append(name)
+        except (docstore.DocError, OSError, httpx.HTTPError) as exc:
+            rejected.append(f"{upload.filename or '(ไม่มีชื่อ)'} ({exc})")
+        finally:
+            await upload.close()
+
+    parts = []
+    if saved:
+        parts.append(f"เพิ่ม {len(saved)} ไฟล์")
+    if replaced:
+        parts.append(f"แทนที่ของเดิม {len(replaced)} ไฟล์ ({', '.join(replaced)})")
+
+    if parts:
+        log.info("อัปโหลดเอกสาร %s (โดย %s)", saved + replaced, user.username)
+        _flash(
+            request,
+            " และ ".join(parts) + " แล้ว — กด “อัปเดต Index” เพื่อให้ระบบเรียนรู้ของใหม่"
+            + (f" · ข้ามไป: {'; '.join(rejected)}" if rejected else ""),
+        )
+    else:
+        _flash(request, f"ไม่ได้รับไฟล์ไหนเลย: {'; '.join(rejected) or 'ไม่มีไฟล์'}", "error")
+
+    return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/knowledge/download")
+async def knowledge_download(name: str, user: auth.User = Depends(require_admin)):
+    """ดาวน์โหลดไฟล์ต้นฉบับไปแก้ แล้วอัปกลับมาทับด้วยชื่อเดิม"""
+    try:
+        safe = docstore.safe_name(name)
+    except docstore.DocError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    data = await run_in_threadpool(docstore.read, safe)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"ไม่พบไฟล์ “{safe}” ในคลังค่ะ")
+
+    # ชื่อไฟล์ภาษาไทยใส่ใน header ตรง ๆ ไม่ได้ (header เป็น latin-1)
+    # filename* แบบ RFC 5987 รองรับ UTF-8 และเบราว์เซอร์ปัจจุบันอ่านได้หมด
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "content-disposition": "attachment; filename*=UTF-8''" + quote(safe)
+        },
+    )
+
+
+@app.post("/admin/knowledge/delete")
+async def knowledge_delete(
+    request: Request,
+    name: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    """ลบเอกสารออกจากคลัง — เอาออกจาก index ด้วยในคราวเดียว
+
+    ลบแค่ไฟล์อย่างเดียวไม่พอ เพราะ index เก็บข้อความไว้ในตัวเองแล้ว
+    ระบบจะยังตอบจากเอกสารที่ "ลบไปแล้ว" ต่อไปจนกว่าจะสร้าง index ใหม่ทั้งหมด
+    """
+    try:
+        safe = docstore.safe_name(name)
+        removed_file = await run_in_threadpool(docstore.delete, safe)
+    except docstore.DocError as exc:
+        _flash(request, str(exc), "error")
+        return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+    except (OSError, httpx.HTTPError) as exc:
+        _flash(request, f"ลบไฟล์ไม่สำเร็จ: {exc}", "error")
+        return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+    index_result = await run_in_threadpool(pipeline.remove_document, safe)
+
+    if not removed_file and not index_result["ok"]:
+        _flash(request, f"ไม่พบเอกสาร “{safe}” ทั้งในคลังและใน index ค่ะ", "error")
+    else:
+        log.info("ลบเอกสาร %s (โดย %s)", safe, user.username)
+        detail = (
+            f" และเอาออกจาก index แล้ว ({index_result['removed']} chunk)"
+            if index_result["ok"]
+            else " (ไม่ได้อยู่ใน index อยู่แล้ว)"
+        )
+        _flash(request, f"ลบเอกสาร “{safe}” ออกจากคลัง{detail}")
+
+    return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/knowledge/index-remove")
+async def knowledge_index_remove(
+    request: Request,
+    name: str = Form(...),
+    user: auth.User = Depends(require_admin),
+):
+    """เอาเอกสารออกจาก index อย่างเดียว — ใช้กับรายการที่ไม่มีไฟล์ต้นฉบับแล้ว"""
+    try:
+        safe = docstore.safe_name(name)
+    except docstore.DocError as exc:
+        _flash(request, str(exc), "error")
+        return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+    result = await run_in_threadpool(pipeline.remove_document, safe)
+    _flash(request, result["message"], "ok" if result["ok"] else "error")
+    if result["ok"]:
+        log.info("เอา %s ออกจาก index (โดย %s)", safe, user.username)
+    return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/knowledge/reindex")
+async def knowledge_reindex(
+    request: Request,
+    mode: str = Form("merge"),
+    user: auth.User = Depends(require_admin),
+):
+    """สร้าง index จากไฟล์ในคลังปัจจุบัน
+
+    merge   = อัปเดตเฉพาะไฟล์ที่มีอยู่ตอนนี้ ทับของชื่อเดิม เอกสารอื่นคงไว้
+    replace = ล้าง index เดิมทิ้งแล้วสร้างใหม่จากไฟล์ในคลังล้วน ๆ
+              ใช้ตอนที่ index มีเศษของเอกสารที่ไม่มีไฟล์แล้วปนอยู่
+    """
+    try:
+        result = await run_in_threadpool(
+            partial(pipeline.ingest, replace=mode == "replace")
+        )
+    except Exception as exc:  # noqa: BLE001 — เอกสารเยอะจนเกินเพดานเวลาเป็นเรื่องปกติ
+        log.error("สร้าง index จากหน้าคลังความรู้ไม่สำเร็จ: %s", exc)
+        _flash(
+            request,
+            "สร้าง index ไม่สำเร็จค่ะ (อาจเพราะเอกสารเยอะเกินเวลาที่เซิร์ฟเวอร์ให้ต่อคำขอ) "
+            "ลองกดใหม่อีกครั้ง หรือรันในเครื่องแทน: "
+            "python scripts/pull_docs.py แล้วตามด้วย python scripts/ingest.py --push",
+            "error",
+        )
+        return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+    message = result["message"]
+    if result.get("failed"):
+        message += " · อ่านไม่ได้: " + ", ".join(f["name"] for f in result["failed"])
+    _flash(request, message, "ok" if result["ok"] else "error")
+    return RedirectResponse("/admin/knowledge", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/admin/users")
 async def users_page(request: Request, user: auth.User = Depends(require_admin)):
     return templates.TemplateResponse(
@@ -592,18 +817,15 @@ async def api_upload(
 ):
     """รับเอกสารเข้าคลัง (ยังไม่สร้าง index)
 
-    รันในเครื่อง -> เขียนลง data/ แล้วกด "สร้าง Index" ต่อได้เลย
-    รันบน Vercel -> ดิสก์เขียนไม่ได้ จึงพักไว้บน Blob ใต้ docs/
-                    ฝั่งเครื่องดึงลงมาด้วย scripts/pull_docs.py แล้ว ingest --push
+    docstore เป็นคนตัดสินว่าไฟล์ไปลง data/ ในเครื่อง หรือขึ้น objectstore ใต้ docs/
+    หน้าเว็บจึงไม่ต้องรู้ว่ารันอยู่บนอะไร — ดูและแก้ไฟล์ต่อได้ที่ /admin/knowledge
     """
-    to_store = config.READ_ONLY_FS and objectstore.enabled()
-
-    if config.READ_ONLY_FS and not to_store:
+    if not docstore.writable():
         raise HTTPException(
             status_code=409,
             detail=(
-                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่ได้ตั้ง BLOB_READ_WRITE_TOKEN "
-                "จึงยังรับไฟล์ไม่ได้ค่ะ — ให้ผูก Vercel Blob เข้ากับโปรเจกต์ก่อน"
+                "เซิร์ฟเวอร์เขียนไฟล์ไม่ได้ และยังไม่มีที่เก็บถาวรค่ะ — "
+                "ต้องตั้ง DATABASE_URL หรือ BLOB_READ_WRITE_TOKEN อย่างน้อยหนึ่งอย่างก่อน"
             ),
         )
 
@@ -611,32 +833,20 @@ async def api_upload(
     rejected: list[dict] = []
 
     for upload in files:
-        name = (upload.filename or "").strip()
-        if not name:
+        raw_name = (upload.filename or "").strip()
+        if not raw_name:
             continue
-        safe_name = name.replace("\\", "/").split("/")[-1]      # กัน path traversal
-        suffix = ("." + safe_name.rsplit(".", 1)[-1]).lower() if "." in safe_name else ""
-
-        if suffix not in config.SUPPORTED_EXTENSIONS:
-            rejected.append({"name": safe_name, "reason": f"ไม่รองรับนามสกุล {suffix or '(ไม่มี)'}"})
-            continue
-
         try:
-            if to_store:
-                data = await run_in_threadpool(upload.file.read)
-                await run_in_threadpool(
-                    objectstore.put,
-                    f"docs/{safe_name}",
-                    data,
-                    upload.content_type or "application/octet-stream",
-                )
-            else:
-                target = config.DATA_DIR / safe_name
-                with target.open("wb") as fh:
-                    shutil.copyfileobj(upload.file, fh)
-            saved.append(safe_name)
-        except (OSError, httpx.HTTPError) as exc:
-            rejected.append({"name": safe_name, "reason": str(exc)})
+            name = docstore.safe_name(raw_name)
+            docstore.check_supported(name)
+            data = await run_in_threadpool(upload.file.read)
+            await run_in_threadpool(
+                docstore.save, name, data,
+                upload.content_type or "application/octet-stream",
+            )
+            saved.append(name)
+        except (docstore.DocError, OSError, httpx.HTTPError) as exc:
+            rejected.append({"name": raw_name, "reason": str(exc)})
         finally:
             await upload.close()
 
@@ -648,7 +858,7 @@ async def api_upload(
         "ok": True,
         "saved": saved,
         "rejected": rejected,
-        "staged_to_blob": to_store,
+        "staged_to_blob": docstore.use_remote(),
         "message": f"อัปโหลด {len(saved)} ไฟล์แล้ว — {next_step}",
     }
 

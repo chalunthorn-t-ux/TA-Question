@@ -63,10 +63,19 @@ def _pg_list(subprefix: str) -> list[dict]:
         return []
     with db.connect() as conn:
         rows = conn.execute(
-            "SELECT key, size FROM app_files WHERE key LIKE %s ORDER BY key",
+            "SELECT key, size, updated_at FROM app_files WHERE key LIKE %s ORDER BY key",
             (f"{subprefix}%",),
         ).fetchall()
-    return [{"key": r[0], "pathname": r[0], "size": r[1], "url": ""} for r in rows]
+    return [
+        {
+            "key": r[0],
+            "pathname": r[0],
+            "size": r[1],
+            "modified": r[2].isoformat(timespec="seconds") if r[2] else "",
+            "url": "",
+        }
+        for r in rows
+    ]
 
 
 def _pg_delete(key: str) -> None:

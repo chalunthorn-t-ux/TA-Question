@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .. import config, objectstore
+from .. import config, docstore, objectstore
 from . import embedder, llm, redact
 from .chunker import chunk_sections
 from .loaders import RawSection, iter_documents, load_file
@@ -130,28 +130,20 @@ def push_index(directory: Path | None = None) -> list[dict]:
     return [{"name": INDEX_BUNDLE, "bytes": len(data), "url": url}]
 
 
-_DOCS_PREFIX = "docs/"
-
-
 def _fetch_docs_from_blob(target: Path) -> list[str]:
     """ดึงเอกสารต้นฉบับที่แอดมินอัปโหลดผ่านหน้าเว็บ (พักไว้บน Blob ใต้ docs/) ลง /tmp
 
     ใช้ตอน ingest บน Vercel เอง — คนละที่จาก scripts/pull_docs.py แต่ตรรกะเดียวกัน
     """
     target.mkdir(parents=True, exist_ok=True)
-    items = [b for b in objectstore.list_keys(_DOCS_PREFIX) if b["key"] != _DOCS_PREFIX]
 
     names: list[str] = []
-    for item in items:
-        name = item["key"][len(_DOCS_PREFIX):]
-        name = name.replace("\\", "/").split("/")[-1]     # กัน path traversal อีกชั้น
-        if not name:
-            continue
-        data = objectstore.get(item["key"])
+    for item in docstore.list_documents():
+        data = docstore.read(item["name"])
         if data is None:
             continue
-        (target / name).write_bytes(data)
-        names.append(name)
+        (target / item["name"]).write_bytes(data)
+        names.append(item["name"])
 
     return names
 

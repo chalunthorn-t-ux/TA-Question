@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>คลังความรู้ · {{ title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🍞</text></svg>" />
+</head>
+<body class="admin-body">
+
+<main class="admin">
+
+  <header class="admin__head">
+    <div>
+      <h1>คลังความรู้</h1>
+      <p>เพิ่ม แก้ไข หรือลบไฟล์เอกสารที่ระบบใช้ตอบคำถาม — แก้แล้วกด “อัปเดต Index” ทุกครั้ง</p>
+    </div>
+    <a href="/" class="btn btn--ghost btn--ghost-dark">← กลับหน้าถาม-ตอบ</a>
+  </header>
+
+  {% if flash %}
+  <div class="admin__flash admin__flash--{{ flash.kind }}">
+    {{ '✅' if flash.kind == 'ok' else '⚠️' }} {{ flash.message }}
+  </div>
+  {% endif %}
+
+  {% if not writable %}
+  <div class="admin__flash admin__flash--error">
+    ⚠️ เซิร์ฟเวอร์นี้เขียนไฟล์ไม่ได้ และยังไม่มีที่เก็บถาวร
+    จึงเพิ่มหรือลบเอกสารจากหน้านี้ไม่ได้<br />
+    ต้องตั้ง <code>DATABASE_URL</code> หรือ <code>BLOB_READ_WRITE_TOKEN</code> อย่างน้อยหนึ่งอย่างก่อน
+  </div>
+  {% endif %}
+
+  <!-- ══════════ ภาพรวม ══════════ -->
+  <section class="card">
+    <h2 class="card__title">ภาพรวม</h2>
+    <div class="table-wrap">
+      <table class="table">
+        <tbody>
+          <tr>
+            <td>ไฟล์ในคลัง</td>
+            <td>{{ files|length }} ไฟล์</td>
+            <td class="muted">เก็บที่ {{ storage }}</td>
+          </tr>
+          <tr>
+            <td>ความรู้ใน index</td>
+            <td>{{ chunk_count }} chunk</td>
+            <td class="muted">{{ index_source }}</td>
+          </tr>
+          <tr>
+            <td>สร้าง index ล่าสุด</td>
+            <td>{{ built_at.replace('T', ' ') if built_at else 'ยังไม่เคยสร้าง' }}</td>
+            <td class="muted">รองรับ {{ extensions }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════ รายการไฟล์ ══════════ -->
+  <section class="card">
+    <h2 class="card__title">ไฟล์เอกสาร <span class="badge">{{ files|length }}</span></h2>
+    <p class="muted">
+      วิธีแก้เอกสาร: กด “ดาวน์โหลด” เอาไฟล์ไปแก้ในเครื่อง แล้วอัปโหลดกลับมา
+      <strong>ด้วยชื่อไฟล์เดิม</strong> ระบบจะเขียนทับให้ จากนั้นกด “อัปเดต Index”
+    </p>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ชื่อไฟล์</th>
+            <th>ขนาด</th>
+            <th>แก้ไขล่าสุด</th>
+            <th>สถานะใน index</th>
+            <th class="table__actions">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in files %}
+          <tr>
+            <td><strong>{{ f.name }}</strong></td>
+            <td class="muted">{{ f.size_text }}</td>
+            <td class="muted">{{ f.modified or '-' }}</td>
+            <td>
+              {% if f.chunks %}
+                <span class="role">{{ f.chunks }} chunk</span>
+              {% else %}
+                <span class="tag">ยังไม่ได้ index</span>
+              {% endif %}
+            </td>
+            <td class="table__actions">
+              <a class="mini-btn" href="/admin/knowledge/download?name={{ f.name | urlencode }}">ดาวน์โหลด</a>
+              {% if writable %}
+              <form method="post" action="/admin/knowledge/delete" class="inline-form"
+                    onsubmit="return confirm('ลบ “{{ f.name }}” ออกจากคลังและออกจาก index?')">
+                <input type="hidden" name="name" value="{{ f.name }}" />
+                <button type="submit" class="mini-btn mini-btn--danger">ลบ</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="muted">ยังไม่มีไฟล์ในคลัง — อัปโหลดด้านล่างได้เลย</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if orphans %}
+  <!-- ══════════ เอกสารที่ไม่มีไฟล์ต้นฉบับแล้ว ══════════ -->
+  <section class="card">
+    <h2 class="card__title">อยู่ใน index แต่ไม่มีไฟล์ต้นฉบับ <span class="badge">{{ orphans|length }}</span></h2>
+    <p class="muted">
+      ระบบยังตอบจากเอกสารเหล่านี้อยู่ แต่ไม่มีไฟล์ให้แก้แล้ว
+      (อาจถูกลบไปตรงที่เก็บ หรือ index มาจากรอบที่สร้างในเครื่อง)
+      — อัปโหลดไฟล์ชื่อเดิมเข้ามาเพื่อกู้คืน หรือเอาออกจาก index ถ้าไม่ใช้แล้ว
+    </p>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>ชื่อเอกสาร</th><th>ใน index</th><th class="table__actions">จัดการ</th></tr>
+        </thead>
+        <tbody>
+          {% for o in orphans %}
+          <tr>
+            <td><strong>{{ o.name }}</strong></td>
+            <td class="muted">{{ o.chunks }} chunk</td>
+            <td class="table__actions">
+              <form method="post" action="/admin/knowledge/index-remove" class="inline-form"
+                    onsubmit="return confirm('เอา “{{ o.name }}” ออกจาก index?')">
+                <input type="hidden" name="name" value="{{ o.name }}" />
+                <button type="submit" class="mini-btn mini-btn--danger">เอาออกจาก index</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="admin__grid">
+    <!-- ══════════ อัปโหลด ══════════ -->
+    <section class="card">
+      <h2 class="card__title">อัปโหลดเอกสาร</h2>
+      <form method="post" action="/admin/knowledge/upload" enctype="multipart/form-data" class="stack">
+        <label class="field">
+          <span class="field__label">เลือกไฟล์ (เลือกหลายไฟล์พร้อมกันได้)</span>
+          <input type="file" name="files" multiple required
+                 accept=".pdf,.docx,.xlsx,.xls,.csv,.txt,.md"
+                 {% if not writable %}disabled{% endif %} />
+          <span class="field__hint">
+            รองรับ {{ extensions }} — ชื่อไฟล์ซ้ำกับของเดิมคือการเขียนทับ (ใช้แก้ไขเอกสาร)
+          </span>
+        </label>
+        <button type="submit" class="btn btn--primary btn--block"
+                {% if not writable %}disabled{% endif %}>อัปโหลด</button>
+      </form>
+    </section>
+
+    <!-- ══════════ สร้าง index ══════════ -->
+    <section class="card">
+      <h2 class="card__title">สร้าง Index</h2>
+      <p class="muted">
+        อัปโหลดหรือลบไฟล์แล้ว ระบบยังไม่รู้จนกว่าจะสร้าง index ใหม่
+        ถ้าเอกสารเยอะมากจนทำผ่านเว็บไม่ทันเวลา ให้รันในเครื่องแทนด้วย
+        <code>scripts/pull_docs.py</code> แล้ว <code>scripts/ingest.py --push</code>
+      </p>
+      <form method="post" action="/admin/knowledge/reindex" class="stack">
+        <input type="hidden" name="mode" value="merge" />
+        <button type="submit" class="btn btn--primary btn--block">
+          อัปเดต Index (เพิ่ม/ทับเฉพาะไฟล์ที่มีอยู่)
+        </button>
+      </form>
+      <form method="post" action="/admin/knowledge/reindex" class="stack"
+            onsubmit="return confirm('ล้าง index เดิมทั้งหมดแล้วสร้างใหม่จากไฟล์ในคลังตอนนี้?')">
+        <input type="hidden" name="mode" value="replace" />
+        <button type="submit" class="btn btn--ghost btn--ghost-dark btn--block">
+          สร้างใหม่ทั้งหมด (ล้างของเดิม)
+        </button>
+      </form>
+    </section>
+  </div>
+
+  <nav class="admin__foot">
+    <a href="/admin/settings" class="btn btn--ghost btn--ghost-dark">ตั้งค่าระบบ →</a>
+    <a href="/admin/users" class="btn btn--ghost btn--ghost-dark">จัดการสมาชิก →</a>
+  </nav>
+
+</main>
+</body>
+</html>
